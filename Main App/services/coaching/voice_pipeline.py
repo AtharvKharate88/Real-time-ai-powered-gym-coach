@@ -1,7 +1,7 @@
 import queue
 import threading
 import time
-import streamlit as st
+from services.diagnostics import log
 
 
 class VoicePipeline:
@@ -22,6 +22,7 @@ class VoicePipeline:
             daemon=True,
         )
         self._worker.start()
+        log("[VOICE] Worker initialized")
 
     def _find_form_issue(self, exercise, metrics):
         if "issue" in metrics:
@@ -30,7 +31,7 @@ class VoicePipeline:
         if exercise == "Squats":
             depth = metrics.get("depth_status", "")
             back_angle = metrics.get("back_angle", 180)
-            
+
             if depth == "TOO HIGH":
                 return "The user's squat is not deep enough — knees are not bending sufficiently."
 
@@ -40,7 +41,7 @@ class VoicePipeline:
         elif exercise == "Push-ups":
             alignment = metrics.get("body_alignment", "")
             hip_status = metrics.get("hip_status", "")
-            
+
             if alignment == "Poor Form":
                 return "The user's body is not straight during the push-up."
 
@@ -53,7 +54,7 @@ class VoicePipeline:
         elif exercise == "Biceps Curls (Dumbbell)":
             swing = metrics.get("swing_status", "")
             shoulder = metrics.get("shoulder_status", "")
-            
+
             if swing == "SWINGING":
                 return "The user is swinging their torso during the curl — keep the body still."
 
@@ -62,7 +63,6 @@ class VoicePipeline:
 
         elif exercise == "Shoulder Press":
             back_arch = metrics.get("back_arch_status", "")
-            extension = metrics.get("extension_status", "")
             if back_arch == "Excessive Arch":
                 return "The user is arching their lower back excessively during the press."
             if back_arch == "Slight Arch":
@@ -101,6 +101,7 @@ class VoicePipeline:
         task = (event, exercise, issue, event_key)
         try:
             self._tasks.put_nowait(task)
+            log(f"[VOICE] Event queued event={event} exercise={exercise}")
         except queue.Full:
             if is_major_event:
                 try:
@@ -109,6 +110,7 @@ class VoicePipeline:
                         self._pending_events.discard(old_task[3])
                     self._tasks.task_done()
                     self._tasks.put_nowait(task)
+                    log(f"[VOICE] Event queued event={event} exercise={exercise}")
                 except queue.Empty:
                     with self._lock:
                         self._pending_events.discard(event_key)
@@ -122,17 +124,33 @@ class VoicePipeline:
     def _run_worker(self):
         while not self._stop_event.is_set():
             try:
-                event, exercise, issue, event_key = self._tasks.get(timeout=0.2)
+                task = self._tasks.get(timeout=0.2)
             except queue.Empty:
                 continue
+            if task is None:
+                break
+            event, exercise, issue, event_key = task
             try:
+                log("[VOICE] Groq request started")
+                groq_started = time.perf_counter()
                 text = self.llm.give_feedback(event, issue)
+                log(
+                    f"[VOICE] Groq request completed in "
+                    f"{(time.perf_counter() - groq_started) * 1000:.0f}ms"
+                )
+                log("[VOICE] TTS generation started")
+                tts_started = time.perf_counter()
                 voice = self.tts.speak(text)
+                log(
+                    f"[VOICE] TTS generation completed in "
+                    f"{(time.perf_counter() - tts_started) * 1000:.0f}ms"
+                )
                 if voice:
                     self._replace_result((voice, text))
             except Exception as error:
                 with self._lock:
                     self._last_error = str(error)
+                log(f"[VOICE] Worker error: {error}")
             finally:
                 with self._lock:
                     self._pending_events.discard(event_key)
@@ -162,12 +180,10 @@ class VoicePipeline:
 
     def stop(self):
         self._stop_event.set()
+        try:
+            self._tasks.put_nowait(None)
+        except queue.Full:
+            pass
         if self._worker.is_alive():
             self._worker.join(timeout=1)
-    
-
-def autoplay_audio(audio_bytes):
-    if not audio_bytes:
-        return   
-    st.markdown("<style>[data-testid='stAudio'] {display: none;}</style>", unsafe_allow_html=True)
-    st.audio(audio_bytes, format="audio/mp3", autoplay=True)
+        log("[VOICE] Worker stopped")

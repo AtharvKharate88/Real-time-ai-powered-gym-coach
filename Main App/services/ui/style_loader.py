@@ -4,18 +4,27 @@ import streamlit.components.v1 as components
 import base64
  
 
+@st.cache_data
+def _read_text(file_path):
+    with open(file_path) as f:
+        return f.read()
+
+
+@st.cache_data
+def _encoded_file(file_path):
+    with open(file_path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+
 def load_css(file_path):
     if os.path.exists(file_path):
-        with open(file_path) as f:
-            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+        st.markdown(f"<style>{_read_text(file_path)}</style>", unsafe_allow_html=True)
 
 
 def inject_local_font(font_path, font_name):
     if not os.path.exists(font_path):
         return
-    
-    with open(font_path, "rb") as f:
-        encoded = base64.b64encode(f.read()).decode()
+    encoded = _encoded_file(font_path)
 
     ext = os.path.splitext(font_path)[1].lstrip(".")
     fmt = {"otf": "opentype"}.get(ext, ext)
@@ -33,13 +42,12 @@ def inject_local_font(font_path, font_name):
     """, unsafe_allow_html=True)
 
 def inject_webrtc_styles():
+    if st.session_state.get("webrtc_styles_injected"):
+        return
     font_path = os.path.join(os.getcwd(), "static", "AdobeClean.otf")
-    
     if not os.path.exists(font_path):
         return
-
-    with open(font_path, "rb") as font_file:
-        encoded_font = base64.b64encode(font_file.read()).decode()
+    encoded_font = _encoded_file(font_path)
 
     components.html(
         f"""
@@ -94,3 +102,4 @@ def inject_webrtc_styles():
         """,
         height=0,
     )
+    st.session_state.webrtc_styles_injected = True

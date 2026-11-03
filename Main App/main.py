@@ -11,17 +11,19 @@ from services.ui.style_loader import (
 )
 import pandas as pd
 from dotenv import load_dotenv
-from services.vision.excercise_video_processor import VideoProcessorClass
 from streamlit_webrtc import webrtc_streamer, WebRtcMode
 from services.tracking.metrics import sync_metrics_update
 from services.persistence.exercise_repository import get_users_exercises
-from services.coaching.llm import LLMCoach
-from services.coaching.tts import TextToSpeech
-from services.coaching.voice_pipeline import VoicePipeline, autoplay_audio
-from groq import Groq
+from services.diagnostics import configure_logging, log, log_webrtc_context
+from services.vision.webrtc_settings import (
+    frontend_rtc_configuration,
+    media_stream_constraints,
+    server_rtc_configuration,
+    turn_configured,
+)
 
 
-@st.fragment(run_every=0.25)
+@st.fragment(run_every=1.0)
 def render_progress_sidebar():
     st.divider()
     st.subheader("Progress")
@@ -65,95 +67,139 @@ def render_progress_sidebar():
         st.metric("Balance Status", st.session_state.balance_status)
 
 
+@st.fragment(run_every=1.0)
 def render_voice_updates():
     pipeline = st.session_state.get("voice_pipeline")
-    if not pipeline:
-        return
-    result = pipeline.get_result()
-    if result:
-        st.session_state.audio_to_play, st.session_state.coach_feedback = result
-    voice_error = pipeline.get_error()
-    if voice_error:
-        st.warning(f"Voice coaching error: {voice_error}")
-    if st.session_state.get("audio_to_play"):
-        autoplay_audio(st.session_state.audio_to_play)
-        st.session_state.audio_to_play = None
-    if st.session_state.get("coach_feedback"):
-        st.success(f"🤖 **Coach:** {st.session_state.coach_feedback}")
+    if pipeline:
+        result = pipeline.get_result()
+        if result:
+            audio_bytes, text = result
+            st.session_state.coach_feedback = text
+            st.session_state.coach_audio_bytes = audio_bytes
+            st.session_state.coach_audio_nonce = (
+                st.session_state.get("coach_audio_nonce", 0) + 1
+            )
+        voice_error = pipeline.get_error()
+        if voice_error:
+            st.session_state.coach_feedback = f"Voice coaching error: {voice_error}"
+    feedback = st.session_state.get("coach_feedback") or "Coach is standing by."
+    st.caption(feedback)
+    audio_bytes = st.session_state.get("coach_audio_bytes")
+    if audio_bytes:
+        st.audio(
+            audio_bytes,
+            format="audio/mp3",
+            autoplay=True,
+        )
+
+
+def _video_processor_factory():
+    from services.vision.excercise_video_processor import VideoProcessorClass
+
+    return VideoProcessorClass()
 
 
 def render_live_workout():
-    ice_servers = [
-        {
-            "urls": [
-                "stun:stun.l.google.com:19302",
-                "stun:stun1.l.google.com:19302",
-                "stun:stun.cloudflare.com:3478",
-            ]
-        }
-    ]
-    turn_url = os.environ.get("TURN_URL")
-    turn_username = os.environ.get("TURN_USERNAME")
-    turn_credential = os.environ.get("TURN_CREDENTIAL")
-    if turn_url and turn_username and turn_credential:
-        ice_servers.append(
-            {
-                "urls": [turn_url],
-                "username": turn_username,
-                "credential": turn_credential,
-            }
+    if not st.session_state.get("_webrtc_component_logged"):
+        log(
+            f"[WEBRTC] Component initialized key=exercise-analysis "
+            f"turn_configured={turn_configured()}"
         )
-
+        st.session_state._webrtc_component_logged = True
+    desired_playing_state = False if st.session_state.get("pending_workout_complete") else None
     context = webrtc_streamer(
         key="exercise-analysis",
         mode=WebRtcMode.SENDRECV,
-        video_processor_factory=VideoProcessorClass,
-        rtc_configuration={"iceServers": ice_servers},
-        media_stream_constraints={"video": True, "audio": False},
+        video_processor_factory=_video_processor_factory,
+        frontend_rtc_configuration=frontend_rtc_configuration(),
+        server_rtc_configuration=server_rtc_configuration(),
+        media_stream_constraints=media_stream_constraints(),
         async_processing=True,
+        sendback_audio=False,
+        desired_playing_state=desired_playing_state,
     )
     st.session_state.live_context = context
+    if context and getattr(context.state, "signalling", False) and not st.session_state.get("_sdp_logged"):
+        log("[WEBRTC] SDP negotiation started")
+        st.session_state._sdp_logged = True
+    log_webrtc_context(context, source="render")
+    if st.session_state.get("pending_workout_complete"):
+        st.success("Workout complete. Stopping the camera.")
+        if context and not context.state.playing and not context.state.signalling:
+            st.session_state.workout_started = False
+            st.session_state._sdp_logged = False
+            stop_voice_pipeline()
+            st.rerun()
 
 
-@st.fragment(run_every=0.25)
+@st.fragment(run_every=0.5)
 def render_live_updates():
     context = st.session_state.get("live_context")
     sync_metrics_update(context)
-    render_voice_updates()
+    log_webrtc_context(context, source="poll")
+    if st.session_state.get("pending_workout_complete") and not st.session_state.get(
+        "_complete_rerun_sent"
+    ):
+        st.session_state._complete_rerun_sent = True
+        st.rerun(scope="app")
+
+
+def ensure_voice_pipeline():
+    if not st.session_state.get("voice_enabled", True):
+        return None
+    pipeline = st.session_state.get("voice_pipeline")
+    if pipeline is not None:
+        return pipeline
+    try:
+        from groq import Groq
+        from services.coaching.llm import LLMCoach
+        from services.coaching.tts import TextToSpeech
+        from services.coaching.voice_pipeline import VoicePipeline
+
+        api_key = os.environ.get("GROQ_API_KEY", "")
+        if not api_key and hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
+            api_key = st.secrets["GROQ_API_KEY"]
+        if not api_key:
+            st.session_state.voice_pipeline = None
+            st.warning("Voice coaching is unavailable: GROQ_API_KEY is not set.")
+            return None
+        groq_client = Groq(api_key=api_key, timeout=20.0)
+        llm_coach = LLMCoach(groq_client)
+        tts = TextToSpeech()
+        st.session_state.voice_pipeline = VoicePipeline(llm_coach, tts)
+        return st.session_state.voice_pipeline
+    except Exception as e:
+        st.session_state.voice_pipeline = None
+        st.warning(f"Voice coaching is unavailable: {e}")
+        return None
+
+
+def stop_voice_pipeline():
+    pipeline = st.session_state.pop("voice_pipeline", None)
+    if pipeline is not None:
+        pipeline.stop()
 
 
 def main():
     load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+    configure_logging()
     st.set_page_config(
         page_icon="🏋️‍♀️",
         page_title="AI Real-time GYM Coach",
-        initial_sidebar_state="expanded",#Initial sidebar visibility
+        initial_sidebar_state="expanded",
         layout="centered"
     )
     load_css(os.path.join(os.getcwd(),"static","style.css"))
     inject_local_font(os.path.join(os.getcwd(),"static","Adobeclean.otf"),"AdobeClean")
+    st.markdown(
+        "<style>[data-testid='stAudio'] {display: none;}</style>",
+        unsafe_allow_html=True,
+    )
     if not render_login_wall():
-        return 
+        return
     initial_session_defaults()
-    #voice pipeline
-    if "voice_pipeline" not in st.session_state:
-        try:
-            api_key = os.environ.get("GROQ_API_KEY", "")
 
-            if not api_key and hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
-                api_key = st.secrets["GROQ_API_KEY"]
-            
-            groq_client = Groq(api_key=api_key)
-            llm_coach = LLMCoach(groq_client)
-            tts = TextToSpeech()
-            st.session_state.voice_pipeline = VoicePipeline(llm_coach, tts)
-        except Exception as e:
-            st.session_state.voice_pipeline = None
-            st.warning(f"Voice coaching is unavailable: {e}")
-
-    # Read workout status
     workout_started=st.session_state.get("workout_started",False)
-    #.get() retrieves the value of workout_started.
     with st.sidebar:
         st.title("🏋️‍♂️ AI Coach")
         if(st.session_state.username):
@@ -166,6 +212,7 @@ def main():
             plan_sets = st.number_input("Sets", min_value=0, max_value=50, key="plan_sets", step=1)
 
             plan_reps = st.number_input("Reps per Set", min_value=0, max_value=50, key="plan_reps", step=1)
+            st.toggle("AI voice coaching", key="voice_enabled")
 
             st.markdown("")
             start_session_button = st.button("Start Session", width="stretch", key="start_session_button")
@@ -175,33 +222,41 @@ def main():
                 st.session_state.reps_per_set = int(plan_reps)
                 st.session_state.reps = 0
                 st.session_state.workout_started = True
+                st.session_state.pending_workout_complete = False
+                st.session_state._sdp_logged = False
+                st.session_state._complete_rerun_sent = False
                 st.session_state.set_cycle_started_at = time.time()
                 st.session_state.last_saved_sets_completed = 0
-                if st.session_state.voice_pipeline:
-                    st.session_state.voice_pipeline.process_event(
+                pipeline = ensure_voice_pipeline()
+                if pipeline:
+                    pipeline.process_event(
                         event="workout_started",
                         exercise=plan_exercise,
                         metrics={}
                     )
-
-                
                 st.session_state.last_notified_sets_completed = 0
                 st.session_state.last_notified_workout_complete = False
                 st.rerun()
         else:
-            exercise = st.session_state.get("plan_exercise")
-            sets = st.session_state.get("plan_sets")
-            reps = st.session_state.get("plan_reps")
+            exercise = st.session_state.get("exercise_type") or st.session_state.get("plan_exercise")
+            sets = st.session_state.get("target_sets") or st.session_state.get("plan_sets")
+            reps = st.session_state.get("reps_per_set") or st.session_state.get("plan_reps")
 
             st.info(f"**{exercise}** -- {sets} Sets / {reps} Reps")
             end_session_button=st.button("End Session",key="end_session_button")
             if(end_session_button):
                 st.session_state["workout_started"]=False
+                st.session_state.pending_workout_complete = False
+                st.session_state._webrtc_component_logged = False
+                st.session_state._sdp_logged = False
+                st.session_state._complete_rerun_sent = False
+                st.session_state.webrtc_styles_injected = False
+                stop_voice_pipeline()
                 st.rerun()
         if workout_started:
             render_progress_sidebar()
     st.title("AI Real-time GYM Coach")
-    st.markdown("#### Real-time pose detection with proactive AI voice coaching")            
+    st.markdown("#### Real-time pose detection with proactive AI voice coaching")
     if not workout_started:
         render_voice_updates()
         st.markdown(
@@ -224,8 +279,11 @@ def main():
             unsafe_allow_html=True,
         )
     else:
+        if st.session_state.get("voice_enabled", True):
+            ensure_voice_pipeline()
         render_live_workout()
         render_live_updates()
+        render_voice_updates()
     st.divider()
     st.markdown("#### Workout History")
     user_id=st.session_state.get("user_id",0)
@@ -252,7 +310,8 @@ def main():
             agg_df.index+=1
             st.table(agg_df,border="horizontal")
         else:
-            st.info("No workout history found")    
-    inject_webrtc_styles()
+            st.info("No workout history found")
+    if workout_started and not st.session_state.get("webrtc_styles_injected"):
+        inject_webrtc_styles()
 if __name__ == "__main__":
     main()

@@ -17,7 +17,8 @@ class LLMCoach:
         response=self.client.chat.completions.create(
             model="qwen/qwen3.8-27b",
             messages=messages,
-            temperature=0.4
+            temperature=0.4,
+            max_tokens=40,
         )
 
         text = response.choices[0].message.content.strip()

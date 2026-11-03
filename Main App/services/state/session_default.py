@@ -38,6 +38,16 @@ def initial_session_defaults():
         "extension_status": "N/A",
         "back_arch_status": "N/A",
         "balance_status": "N/A",
+        "voice_enabled": True,
+        "audio_to_play": None,
+        "coach_audio_bytes": None,
+        "coach_audio_nonce": 0,
+        "coach_feedback": "",
+        "pending_workout_complete": False,
+        "webrtc_styles_injected": False,
+        "_sdp_logged": False,
+        "_complete_rerun_sent": False,
+        "_webrtc_component_logged": False,
     }
 
     for key, value in defaults.items():
