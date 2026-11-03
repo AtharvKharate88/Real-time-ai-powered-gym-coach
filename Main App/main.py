@@ -9,6 +9,7 @@ from services.ui.style_loader import (
     inject_local_font,
     inject_webrtc_styles,
 )
+from services.ui.landing_page import render_landing_page
 import pandas as pd
 from dotenv import load_dotenv
 from streamlit_webrtc import webrtc_streamer, WebRtcMode
@@ -187,21 +188,33 @@ def main():
         page_icon="🏋️‍♀️",
         page_title="AI Real-time GYM Coach",
         initial_sidebar_state="expanded",
-        layout="centered"
+        layout="wide",
     )
+    if st.query_params.get("view", "landing") == "landing":
+        render_landing_page()
+        return
     load_css(os.path.join(os.getcwd(),"static","style.css"))
     inject_local_font(os.path.join(os.getcwd(),"static","Adobeclean.otf"),"AdobeClean")
     st.markdown(
         "<style>[data-testid='stAudio'] {display: none;}</style>",
         unsafe_allow_html=True,
     )
+    if st.session_state.get("user_id") is None:
+        if st.button("← Back to landing page", key="back_to_landing_login"):
+            st.query_params["view"] = "landing"
+            st.rerun()
     if not render_login_wall():
         return
+    if st.query_params.get("view") == "login":
+        st.query_params["view"] = "app"
     initial_session_defaults()
 
     workout_started=st.session_state.get("workout_started",False)
     with st.sidebar:
         st.title("🏋️‍♂️ AI Coach")
+        if not workout_started and st.button("← Landing page", key="back_to_landing"):
+            st.query_params["view"] = "landing"
+            st.rerun()
         if(st.session_state.username):
             st.caption(f"👤 Login as {st.session_state.username}")
             st.divider()
