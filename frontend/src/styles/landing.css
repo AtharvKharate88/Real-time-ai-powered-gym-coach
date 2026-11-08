@@ -1,3 +1,10 @@
+@font-face {
+  font-family: "Averta";
+  src: url("/fonts/Averta.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+}
+
 /* ============================================================
    AXFORM — Real-time AI GYM Trainer
    style.css
@@ -87,6 +94,108 @@ img { display: block; width: 100%; height: 100%; object-fit: contain; }
   transition: color 0.2s;
 }
 .nav-links a:hover { color: var(--amber); }
+
+.backend-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.backend-status-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.backend-status-loading { color: var(--muted); }
+.backend-status-connected { color: #7ed957; }
+.backend-status-connected .backend-status-dot { background: #7ed957; }
+.backend-status-disconnected { color: #ff6b6b; }
+.backend-status-disconnected .backend-status-dot { background: #ff6b6b; }
+
+.workout-page {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  padding: 120px 48px 80px;
+}
+.workout-back { margin-bottom: 32px; }
+.workout-panel {
+  max-width: 1200px;
+  margin: 40px auto 0;
+  border: 1px solid var(--border);
+  padding: 24px;
+  background: rgba(18,18,18,0.82);
+}
+.workout-controls {
+  display: flex;
+  align-items: end;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.workout-controls label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.workout-controls select,
+.workout-controls input {
+  min-height: 38px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  padding: 8px;
+}
+.workout-video-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+}
+.workout-video-grid > div {
+  display: grid;
+  gap: 10px;
+}
+.workout-video-grid video {
+  width: 100%;
+  min-height: 260px;
+  background: #050505;
+  object-fit: cover;
+}
+.workout-metrics {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding-top: 24px;
+  color: var(--muted);
+}
+.workout-metrics strong { color: var(--amber); }
+.workout-error { color: #ff6b6b; }
+.workout-feedback,
+.workout-history {
+  margin-top: 24px;
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+.workout-feedback p { color: var(--text); font-size: 18px; }
+.workout-detail-grid {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  color: var(--muted);
+}
+.voice-toggle {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px;
+}
+.workout-history { color: var(--muted); line-height: 1.8; }
 
 /* ── HERO ── */
 .hero {

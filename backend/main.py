@@ -9,7 +9,6 @@ from services.ui.style_loader import (
     inject_local_font,
     inject_webrtc_styles,
 )
-from services.ui.landing_page import render_landing_page
 import pandas as pd
 from dotenv import load_dotenv
 from streamlit_webrtc import webrtc_streamer, WebRtcMode
@@ -190,9 +189,6 @@ def main():
         initial_sidebar_state="expanded",
         layout="wide",
     )
-    if st.query_params.get("view", "landing") == "landing":
-        render_landing_page()
-        return
     load_css(os.path.join(os.getcwd(),"static","style.css"))
     inject_local_font(os.path.join(os.getcwd(),"static","Adobeclean.otf"),"AdobeClean")
     st.markdown(

@@ -9,7 +9,7 @@ import streamlit as st
 def _landing_page_root() -> Path:
     main_app_root = Path(__file__).resolve().parents[2]
     repository_root = main_app_root.parent
-    for candidate in (main_app_root / "LandingPage", repository_root / "LandingPage"):
+    for candidate in (main_app_root / "LandingPage", repository_root / "frontend"):
         if candidate.is_dir():
             return candidate
     raise FileNotFoundError("LandingPage directory was not found.")

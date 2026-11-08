@@ -18,7 +18,7 @@ from services.diagnostics import VideoStats, log
 
 
 class VideoProcessorClass(VideoProcessorBase):
-    _INFER_MAX_WIDTH = 640
+    _INFER_MAX_WIDTH = 320
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -43,7 +43,11 @@ class VideoProcessorClass(VideoProcessorBase):
         started = time.perf_counter()
         log("[VIDEO] MediaPipe PoseLandmarker loading on video thread")
         try:
-            model_path = os.path.join(os.getcwd(), "ml_models", "pose_landmarker_full.task")
+            model_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                "ml_models",
+                "pose_landmarker_full.task",
+            )
             options = vision.PoseLandmarkerOptions(
                 base_options=python.BaseOptions(model_asset_path=model_path),
                 running_mode=vision.RunningMode.VIDEO,
@@ -61,6 +65,10 @@ class VideoProcessorClass(VideoProcessorBase):
             self._landmarker_error = str(error)
             log(f"[VIDEO] MediaPipe PoseLandmarker failed to load: {error}")
         return self._landmarker
+
+    def warm_up(self):
+        """Load the pose model before video frames begin processing."""
+        return self._ensure_landmarker() is not None
 
     def set_latest_metrics(self, metrics):
         with self._lock:
