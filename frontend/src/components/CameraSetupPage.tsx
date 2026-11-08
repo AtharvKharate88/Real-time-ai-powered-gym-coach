@@ -14,6 +14,7 @@ interface CameraSetupPageProps {
 export default function CameraSetupPage({ user, cameraGuidance, onContinue, onBack, onDashboard, onSignOut }: CameraSetupPageProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const cameraRequestRef = useRef<{ deviceId?: string; promise: Promise<void> } | null>(null);
   const transferredRef = useRef(false);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState("");
@@ -21,44 +22,58 @@ export default function CameraSetupPage({ user, cameraGuidance, onContinue, onBa
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
 
-  const connectCamera = useCallback(async (requestedDeviceId?: string) => {
+  const connectCamera = useCallback((requestedDeviceId?: string) => {
+    const existingRequest = cameraRequestRef.current;
+    if (existingRequest && existingRequest.deviceId === requestedDeviceId) return existingRequest.promise;
+
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     setStatus("connecting");
     setError("");
-    try {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error("Camera access is not available in this browser. Use a current browser over HTTPS or localhost.");
+    const request = (async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error("Camera access is not available in this browser. Use a current browser over HTTPS or localhost.");
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            ...(requestedDeviceId ? { deviceId: { exact: requestedDeviceId } } : {}),
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            frameRate: { ideal: 15, max: 24 },
+          },
+          audio: false,
+        });
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+
+        const activeDevice = stream.getVideoTracks()[0]?.getSettings().deviceId ?? requestedDeviceId ?? "";
+        setDeviceId(activeDevice);
+        setStatus("ready");
+
+        // Device names are useful for the selector, but should not delay the live preview.
+        void navigator.mediaDevices.enumerateDevices()
+          .then((inputs) => setDevices(inputs.filter((device) => device.kind === "videoinput")))
+          .catch(() => setDevices([]));
+      } catch (cameraError) {
+        setStatus("error");
+        const name = cameraError instanceof DOMException ? cameraError.name : "";
+        setError(name === "NotAllowedError"
+          ? "Camera permission was denied. Allow camera access in your browser, then retry."
+          : name === "NotFoundError"
+            ? "No camera was found. Connect a camera and retry."
+            : cameraError instanceof Error ? cameraError.message : "Could not connect to the camera.");
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          ...(requestedDeviceId ? { deviceId: { exact: requestedDeviceId } } : {}),
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-          frameRate: { ideal: 15, max: 24 },
-        },
-        audio: false,
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-      const inputs = await navigator.mediaDevices.enumerateDevices();
-      const cameras = inputs.filter((device) => device.kind === "videoinput");
-      setDevices(cameras);
-      const activeDevice = stream.getVideoTracks()[0]?.getSettings().deviceId ?? cameras[0]?.deviceId ?? "";
-      setDeviceId(activeDevice);
-      setStatus("ready");
-    } catch (cameraError) {
-      setStatus("error");
-      const name = cameraError instanceof DOMException ? cameraError.name : "";
-      setError(name === "NotAllowedError"
-        ? "Camera permission was denied. Allow camera access in your browser, then retry."
-        : name === "NotFoundError"
-          ? "No camera was found. Connect a camera and retry."
-          : cameraError instanceof Error ? cameraError.message : "Could not connect to the camera.");
-    }
+    })();
+
+    cameraRequestRef.current = { deviceId: requestedDeviceId, promise: request };
+    void request.finally(() => {
+      if (cameraRequestRef.current?.promise === request) cameraRequestRef.current = null;
+    });
+    return request;
   }, []);
 
   useEffect(() => {
