@@ -1,12 +1,23 @@
-import { useEffect, useState } from "react";
-import { getCurrentUser, loginWithGoogle, logout, type AuthUser } from "../services/api";
+import { loginWithGoogle, type AuthUser } from "../services/api";
 
-export default function AuthStatus() {
-  const [user, setUser] = useState<AuthUser | null>(null);
+interface AuthStatusProps {
+  user: AuthUser | null;
+  loading: boolean;
+  onSignOut: () => void;
+}
 
-  useEffect(() => {
-    getCurrentUser().then(setUser).catch(() => setUser(null));
-  }, []);
+export default function AuthStatus({
+  user,
+  loading,
+  onSignOut,
+}: AuthStatusProps) {
+  if (loading) {
+    return (
+      <button type="button" className="btn-ghost auth-button" disabled>
+        Checking account…
+      </button>
+    );
+  }
 
   if (!user) {
     return (
@@ -17,12 +28,8 @@ export default function AuthStatus() {
   }
 
   return (
-    <button
-      type="button"
-      className="btn-ghost auth-button"
-      onClick={() => logout().then(() => setUser(null))}
-    >
-      {user.full_name ?? user.email} · Sign out
+    <button type="button" className="btn-ghost auth-button" onClick={onSignOut} aria-label={`Sign out ${user.full_name ?? user.email}`} title={user.full_name ?? user.email}>
+      Sign out
     </button>
   );
 }

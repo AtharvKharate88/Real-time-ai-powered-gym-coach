@@ -21,6 +21,15 @@ from api.services.workout_sessions import session_manager  # noqa: E402
 
 
 class WorkoutOwnershipTests(unittest.TestCase):
+    def test_anonymous_users_cannot_create_workout_sessions(self) -> None:
+        response = TestClient(app).post(
+            "/api/workouts/sessions",
+            json={"exercise": "Squats", "target_sets": 3, "reps_per_set": 10},
+        )
+        if response.status_code == 201:
+            session_manager.remove(response.json()["session_id"])
+        self.assertEqual(response.status_code, 401)
+
     def test_session_is_hidden_from_a_different_user(self) -> None:
         session = WorkoutSession("Squats", 3, 10, user_id=7)
         request = SimpleNamespace()
@@ -59,6 +68,62 @@ class WorkoutOwnershipTests(unittest.TestCase):
             workouts.history(request)
         get_history.assert_called_once_with(7)
 
+    def test_completed_session_exposes_and_persists_its_estimated_form_score(self) -> None:
+        class ScoredProcessor:
+            def get_latest_metrics(self):
+                return {
+                    "reps": 10,
+                    "pose_detected": True,
+                    "movement_valid": True,
+                    "form_status": "warning",
+                }
+
+            def get_form_score(self):
+                return 82
+
+        session = WorkoutSession("Squats", 1, 10, user_id=7)
+        session.processor = ScoredProcessor()
+        session.start()
+        session.queue_voice_event = lambda *_args, **_kwargs: None
+        with (
+            patch("api.routes.workouts.get_request_session", return_value=session),
+            patch("api.routes.workouts.add_exercise") as persist,
+        ):
+            response = workouts.get_metrics("session-id", SimpleNamespace())
+
+        self.assertEqual(response.form_score, 82)
+        self.assertTrue(session.persisted)
+        self.assertEqual(persist.call_args.args[:4], (7, "Squats", 10, 1))
+        self.assertEqual(persist.call_args.args[5], 82)
+
+    def test_voice_status_reports_when_coaching_is_not_configured(self) -> None:
+        session = WorkoutSession("Squats", 3, 10, user_id=7)
+        request = SimpleNamespace()
+        with patch("api.routes.workouts.get_request_session", return_value=session):
+            response = workouts.get_voice("session-id", request)
+        self.assertFalse(response.available)
+        self.assertIsNone(response.text)
+
+    def test_voice_status_reports_when_a_coaching_cue_is_ready(self) -> None:
+        pipeline = SimpleNamespace(get_result=lambda: (b"audio", "Keep your back straight."), get_error=lambda: None)
+        session = WorkoutSession("Squats", 3, 10, user_id=7)
+        session.voice_pipeline = pipeline
+        request = SimpleNamespace()
+        with patch("api.routes.workouts.get_request_session", return_value=session):
+            response = workouts.get_voice("session-id", request)
+        self.assertTrue(response.available)
+        self.assertEqual(response.text, "Keep your back straight.")
+
+    def test_voice_status_does_not_expose_internal_error_details(self) -> None:
+        pipeline = SimpleNamespace(get_result=lambda: None, get_error=lambda: "private provider details")
+        session = WorkoutSession("Squats", 3, 10, user_id=7)
+        session.voice_pipeline = pipeline
+        request = SimpleNamespace()
+        with patch("api.routes.workouts.get_request_session", return_value=session):
+            response = workouts.get_voice("session-id", request)
+        self.assertTrue(response.error)
+        self.assertIsNone(response.text)
+
     def test_database_health_does_not_return_connection_details(self) -> None:
         with patch(
             "api.routes.health.check_database_connection",
@@ -85,7 +150,7 @@ class WorkoutOwnershipTests(unittest.TestCase):
             return SimpleNamespace(id=int(user_id)) if user_id else None
 
         with (
-            patch("api.routes.workouts.optional_current_user", side_effect=fake_user),
+            patch("api.routes.workouts.current_user", side_effect=fake_user),
             patch("api.services.workout_access.optional_current_user", side_effect=fake_user),
         ):
             client = TestClient(app)

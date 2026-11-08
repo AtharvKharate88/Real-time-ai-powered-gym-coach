@@ -17,10 +17,10 @@ class SquatDetector(BaseExcercise):
         super().__init__()
 
     def reset(self):
-        self.reps=0
-        self.stage=None
+        self.reset_rep_tracking()
 
     def process(self,landmarks):
+        previous_reps = self.reps
         #find angle of both leg the leg with more visiblities are considered
         
         left_knee_angle = self.calculate_angle(
@@ -35,41 +35,74 @@ class SquatDetector(BaseExcercise):
             self.get_point(landmarks, self.RIGHT_ANKLE)
         )
 
-        left_vis = landmarks[self.LEFT_KNEE].visibility
-        right_vis = landmarks[self.RIGHT_KNEE].visibility
+        left_visible = all(landmarks[index].visibility > self.MIN_VISIBILITY for index in (self.LEFT_HIP, self.LEFT_KNEE, self.LEFT_ANKLE))
+        right_visible = all(landmarks[index].visibility > self.MIN_VISIBILITY for index in (self.RIGHT_HIP, self.RIGHT_KNEE, self.RIGHT_ANKLE))
+        left_score = min(landmarks[index].visibility for index in (self.LEFT_HIP, self.LEFT_KNEE, self.LEFT_ANKLE))
+        right_score = min(landmarks[index].visibility for index in (self.RIGHT_HIP, self.RIGHT_KNEE, self.RIGHT_ANKLE))
 
-        if left_vis >= right_vis:
+        if left_visible and right_visible:
+            use_left = left_score >= right_score
+        elif left_visible:
+            use_left = True
+        elif right_visible:
+            use_left = False
+        else:
+            use_left = left_score >= right_score
+
+        if use_left:
             knee_angle = left_knee_angle
             hip_idx, knee_idx, ankle_idx, shoulder_idx = self.LEFT_HIP, self.LEFT_KNEE, self.LEFT_ANKLE, self.LEFT_SHOULDER
         else:
             knee_angle = right_knee_angle
             hip_idx, knee_idx, ankle_idx, shoulder_idx = self.RIGHT_HIP, self.RIGHT_KNEE, self.RIGHT_ANKLE, self.RIGHT_SHOULDER
-        #calculate the back angle with knee hip and shoulder of left or right which is visible
-        back_angle = self.calculate_angle(
-            self.get_point(landmarks, shoulder_idx),
-            self.get_point(landmarks, hip_idx),
-            self.get_point(landmarks, knee_idx)
+        key_landmark_visible = left_visible if use_left else right_visible
+        back_angle = (
+            int(self.calculate_angle(
+                self.get_point(landmarks, shoulder_idx),
+                self.get_point(landmarks, hip_idx),
+                self.get_point(landmarks, knee_idx),
+            ))
+            if key_landmark_visible and landmarks[shoulder_idx].visibility > self.MIN_VISIBILITY
+            else "N/A"
         )
-        #if visiblity>min visi then update the metrics
-        key_landmark_visible = landmarks[hip_idx].visibility >= self.MIN_VISIBILITY and landmarks[knee_idx].visibility >= self.MIN_VISIBILITY and landmarks[ankle_idx].visibility >= self.MIN_VISIBILITY
 
         if key_landmark_visible:
-            if knee_angle < self.DOWN_THRESHOLD:
-                self.stage = "down"
+            self.update_rep_stage(
+                knee_angle,
+                low_threshold=self.DOWN_THRESHOLD,
+                high_threshold=self.UP_THRESHOLD,
+                low_stage="down",
+                high_stage="up",
+                count_stage="up",
+            )
 
-            if knee_angle >= self.UP_THRESHOLD and self.stage == "down":
-                self.stage = "up"
-                self.reps += 1
-
-        if self.stage == "down":
+        if not key_landmark_visible:
+            depth_status = "N/A"
+        elif self.stage == "down":
             depth_status = "GOOD DEPTH" if knee_angle <= self.DOWN_THRESHOLD else "TOO HIGH"
         elif self.stage == "up":
             depth_status = "STANDING"
         else:
             depth_status = "N/A"
-        return {
+        result = {
             "reps": self.reps,
-            "knee_angle": int(knee_angle),
-            "back_angle": int(back_angle),
-            "depth_status": depth_status
+            "knee_angle": int(knee_angle) if key_landmark_visible else "N/A",
+            "back_angle": back_angle,
+            "depth_status": depth_status,
+            "landmarks_visible": key_landmark_visible,
         }
+        issues = []
+        if key_landmark_visible:
+            if depth_status == "TOO HIGH":
+                issues.append("Increase squat depth")
+            if isinstance(back_angle, int) and back_angle < 130:
+                issues.append("Keep your torso more upright")
+        selected_indices = (hip_idx, knee_idx, ankle_idx)
+        return self.add_feedback(
+            result,
+            movement_valid=key_landmark_visible,
+            feedback_valid=key_landmark_visible and back_angle != "N/A",
+            confidence_values=[landmarks[index].visibility for index in selected_indices],
+            previous_reps=previous_reps,
+            issues=issues,
+        )

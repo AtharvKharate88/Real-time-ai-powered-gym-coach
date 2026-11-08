@@ -1,7 +1,7 @@
 
 """Shared workout persistence using SQLAlchemy and Neon PostgreSQL."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from sqlalchemy import select
 
@@ -15,49 +15,25 @@ def add_exercise(
     reps: int,
     sets: int,
     elapsed_seconds: float,
+    form_score: int | None = None,
+    created_at: datetime | None = None,
+    set_breakdown: list[int] | None = None,
 ) -> None:
-    """
-    Save workout progress.
-
-    Combine the same user's exercise entries for the current UTC day.
-    A None user_id represents an anonymous FastAPI workout.
-    """
-
-    now = datetime.now(timezone.utc)
-    day_start = now.replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
-    next_day = day_start + timedelta(days=1)
+    """Save one workout session as a separate history entry."""
+    if form_score is not None and not 0 <= form_score <= 100:
+        raise ValueError("form_score must be between 0 and 100")
 
     with SessionLocal.begin() as db:
-        statement = select(Exercise).where(
-            Exercise.exercise_name == exercise_name,
-            Exercise.created_at >= day_start,
-            Exercise.created_at < next_day,
-        )
-
-        if user_id is None:
-            statement = statement.where(Exercise.user_id.is_(None))
-        else:
-            statement = statement.where(Exercise.user_id == user_id)
-
-        existing = db.scalar(
-            statement.order_by(Exercise.created_at.desc()).limit(1)
-        )
-
-        if existing:
-            existing.reps += reps
-            existing.sets += sets
-            existing.time += float(elapsed_seconds)
-        else:
-            workout = Exercise(
-                user_id=user_id,
-                exercise_name=exercise_name,
-                reps=reps,
-                sets=sets,
-                time=float(elapsed_seconds),
-            )
-            db.add(workout)
+        db.add(Exercise(
+            user_id=user_id,
+            exercise_name=exercise_name,
+            reps=reps,
+            sets=sets,
+            time=float(elapsed_seconds),
+            form_score=form_score,
+            **({"created_at": created_at} if created_at is not None else {}),
+            set_breakdown=set_breakdown,
+        ))
 
 
 
@@ -79,6 +55,8 @@ def get_users_exercises(user_id: int) -> list[dict]:
                 "reps": workout.reps,
                 "sets": workout.sets,
                 "time": workout.time,
+                "form_score": workout.form_score,
+                "set_breakdown": workout.set_breakdown,
                 "created_at": workout.created_at,
             }
             for workout in workouts
@@ -101,6 +79,8 @@ def get_anonymous_history() -> list[dict]:
                 "reps": workout.reps,
                 "sets": workout.sets,
                 "time": workout.time,
+                "form_score": workout.form_score,
+                "set_breakdown": workout.set_breakdown,
                 "created_at": (
                     workout.created_at.isoformat()
                     if workout.created_at

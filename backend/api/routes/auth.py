@@ -29,13 +29,13 @@ async def google_callback(code: str, state: str) -> RedirectResponse:
     tokens = await exchange_code(code)
     claims = await verify_id_token(tokens.get("id_token", ""))
     user = upsert_google_user(claims)
-    response = RedirectResponse(settings.frontend_origin + "/?view=workout")
+    response = RedirectResponse(settings.frontend_origin + "/?view=dashboard")
     response.set_cookie(
         settings.auth_cookie_name,
         create_session_token(user),
         httponly=True,
         secure=settings.cookie_secure,
-        samesite="lax",
+        samesite=settings.auth_cookie_samesite,
         max_age=3600,
         path="/",
     )
@@ -50,7 +50,7 @@ def logout() -> JSONResponse:
         path="/",
         httponly=True,
         secure=settings.cookie_secure,
-        samesite="lax",
+        samesite=settings.auth_cookie_samesite,
     )
     return response
 

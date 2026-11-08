@@ -21,14 +21,27 @@ class PushUpDetector(BaseExercise):
         super().__init__()
 
     def reset(self) -> None:
-        self.reps = 0
-        self.stage = None
+        self.reset_rep_tracking()
 
     def process(self, landmarks) -> dict:
-        left_vis = landmarks[self.LEFT_ELBOW].visibility
-        right_vis = landmarks[self.RIGHT_ELBOW].visibility
+        previous_reps = self.reps
+        left_indices = (self.LEFT_SHOULDER, self.LEFT_ELBOW, self.LEFT_WRIST, self.LEFT_HIP, self.LEFT_ANKLE)
+        right_indices = (self.RIGHT_SHOULDER, self.RIGHT_ELBOW, self.RIGHT_WRIST, self.RIGHT_HIP, self.RIGHT_ANKLE)
+        left_score = min(landmarks[index].visibility for index in left_indices)
+        right_score = min(landmarks[index].visibility for index in right_indices)
+        left_visible = left_score > self.MIN_VISIBILITY
+        right_visible = right_score > self.MIN_VISIBILITY
 
-        if left_vis >= right_vis:
+        if left_visible and right_visible:
+            use_left = left_score >= right_score
+        elif left_visible:
+            use_left = True
+        elif right_visible:
+            use_left = False
+        else:
+            use_left = left_score >= right_score
+
+        if use_left:
             shoulder_idx = self.LEFT_SHOULDER
             elbow_idx = self.LEFT_ELBOW
             wrist_idx = self.LEFT_WRIST
@@ -60,34 +73,61 @@ class PushUpDetector(BaseExercise):
         expected_hip_y = (shoulder_y + ankle_y) / 2
         hip_deviation = hip_y - expected_hip_y
         #hip shouldnt bend during deviation
-        key_landmarks_visible = landmarks[shoulder_idx].visibility > self.MIN_VISIBILITY and landmarks[elbow_idx].visibility > self.MIN_VISIBILITY and landmarks[wrist_idx].visibility > self.MIN_VISIBILITY and landmarks[hip_idx].visibility > self.MIN_VISIBILITY
+        key_landmarks_visible = left_visible if use_left else right_visible
         
         if key_landmarks_visible:
-            if elbow_angle < self.DOWN_THRESHOLD:
-                self.stage = "down"
+            self.update_rep_stage(
+                elbow_angle,
+                low_threshold=self.DOWN_THRESHOLD,
+                high_threshold=self.UP_THRESHOLD,
+                low_stage="down",
+                high_stage="up",
+                count_stage="up",
+            )
 
-            if elbow_angle > self.UP_THRESHOLD and self.stage == "down":
-                self.stage = "up"
-                self.reps += 1
-
-        if body_angle > 160:
-            body_alignment = "Straight"
-        elif body_angle > 140:
-            body_alignment = "Slight Bend"
+        if not key_landmarks_visible:
+            body_alignment = "N/A"
+            hip_status = "N/A"
         else:
-            body_alignment = "Poor Form"
+            if body_angle > 160:
+                body_alignment = "Straight"
+            elif body_angle > 140:
+                body_alignment = "Slight Bend"
+            else:
+                body_alignment = "Poor Form"
+            if abs(hip_deviation) <= self.HIP_SAG_TOLERANCE:
+                hip_status = "LEVEL"
+            elif hip_deviation > 0:
+                hip_status = "SAGGING"
+            else:
+                hip_status = "PIKED UP"
 
-        if abs(hip_deviation) <= self.HIP_SAG_TOLERANCE:
-            hip_status = "LEVEL"
-        elif hip_deviation > self.HIP_SAG_TOLERANCE:
-            hip_status = "SAGGING"
-        else:
-            hip_status = "PIKED UP"
-
-        return {
+        result = {
             "reps": self.reps,
-            "elbow_angle": int(elbow_angle),
+            "elbow_angle": int(elbow_angle) if key_landmarks_visible else "N/A",
             "body_alignment": body_alignment,
             "hip_status": hip_status,
+            "landmarks_visible": key_landmarks_visible,
         }
+        issues = []
+        severity = "warning"
+        if key_landmarks_visible:
+            if body_alignment == "Slight Bend":
+                issues.append("Keep your body aligned")
+            elif body_alignment == "Poor Form":
+                issues.append("Keep your body in a straight line")
+                severity = "incorrect"
+            if hip_status in {"SAGGING", "PIKED UP"}:
+                issues.append("Keep your hips level")
+                severity = "incorrect"
+        selected_indices = (shoulder_idx, elbow_idx, wrist_idx, hip_idx, ankle_idx)
+        return self.add_feedback(
+            result,
+            movement_valid=key_landmarks_visible,
+            feedback_valid=key_landmarks_visible,
+            confidence_values=[landmarks[index].visibility for index in selected_indices],
+            previous_reps=previous_reps,
+            issues=issues,
+            severity=severity,
+        )
     

@@ -25,6 +25,9 @@ class VoicePipeline:
         log("[VOICE] Worker initialized")
 
     def _find_form_issue(self, exercise, metrics):
+        structured_issue = metrics.get("form_issue")
+        if isinstance(structured_issue, str) and structured_issue:
+            return structured_issue
         if "issue" in metrics:
             return metrics["issue"]
 

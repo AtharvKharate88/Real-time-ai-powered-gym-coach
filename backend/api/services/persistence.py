@@ -16,6 +16,9 @@ def add_exercise(
     reps: int,
     sets: int,
     elapsed_seconds: int | float,
+    form_score: int | None = None,
+    created_at: datetime | None = None,
+    set_breakdown: list[int] | None = None,
 ) -> None:
     """
     Persist a completed workout to Neon, keeping anonymous workouts unassigned.
@@ -26,6 +29,9 @@ def add_exercise(
         reps=reps,
         sets=sets,
         elapsed_seconds=float(elapsed_seconds),
+        form_score=form_score,
+        created_at=created_at,
+        set_breakdown=set_breakdown,
     )
 
 

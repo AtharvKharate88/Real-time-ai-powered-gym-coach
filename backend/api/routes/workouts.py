@@ -8,9 +8,10 @@ from ..schemas.workout import (
     WorkoutMetricsResponse,
     WorkoutSessionResponse,
     HistoryEntry,
+    ManualWorkoutRequest,
     VoiceResponse,
 )
-from ..services.auth import optional_current_user
+from ..services.auth import current_user, optional_current_user
 from ..services.persistence import add_exercise, get_history
 from ..services.workout_access import get_request_session
 from ..services.workout_sessions import session_manager
@@ -28,16 +29,20 @@ def _response(session_id: str, session) -> WorkoutSessionResponse:
     )
 
 
+def _session_set_breakdown(reps: int, reps_per_set: int) -> list[int]:
+    return [min(reps_per_set, reps - offset) for offset in range(0, reps, reps_per_set)]
+
+
 @router.post("/sessions", response_model=WorkoutSessionResponse, status_code=201)
 def create_session(
     body: CreateWorkoutRequest, request: Request
 ) -> WorkoutSessionResponse:
-    user = optional_current_user(request)
+    user = current_user(request)
     session_id, session = session_manager.create(
         body.exercise,
         body.target_sets,
         body.reps_per_set,
-        user_id=user.id if user is not None else None,
+        user_id=user.id,
     )
     return _response(session_id, session)
 
@@ -59,6 +64,8 @@ def get_metrics(session_id: str, request: Request) -> WorkoutMetricsResponse:
                 reps,
                 sets_completed,
                 session.elapsed_seconds(),
+                session.form_score(),
+                set_breakdown=_session_set_breakdown(reps, session.reps_per_set),
             )
             session.persisted = True
     if not bool(metrics.get("pose_detected", True)):
@@ -77,6 +84,7 @@ def get_metrics(session_id: str, request: Request) -> WorkoutMetricsResponse:
         current_set_reps=reps % session.reps_per_set,
         workout_completed=workout_completed,
         elapsed_seconds=session.elapsed_seconds(),
+        form_score=session.form_score(),
         metrics=metrics,
     )
 
@@ -116,6 +124,8 @@ def stop_session(session_id: str, request: Request) -> SessionActionResponse:
             reps,
             sets_completed,
             session.elapsed_seconds(),
+            session.form_score(),
+            set_breakdown=_session_set_breakdown(reps, session.reps_per_set),
         )
         session.persisted = True
     session.close()
@@ -131,19 +141,41 @@ def history(request: Request) -> list[HistoryEntry]:
     ]
 
 
-@router.get("/sessions/{session_id}/voice", response_model=VoiceResponse | None)
-def get_voice(session_id: str, request: Request) -> VoiceResponse | None:
+@router.post("/history/manual", response_model=HistoryEntry, status_code=201)
+def add_manual_workout(body: ManualWorkoutRequest, request: Request) -> HistoryEntry:
+    user = current_user(request)
+    add_exercise(
+        user.id,
+        body.exercise_name,
+        body.reps,
+        body.sets,
+        body.time,
+        created_at=body.created_at,
+    )
+    return HistoryEntry(
+        exercise_name=body.exercise_name,
+        reps=body.reps,
+        sets=body.sets,
+        time=body.time,
+        form_score=None,
+        created_at=body.created_at.isoformat(),
+    )
+
+
+@router.get("/sessions/{session_id}/voice", response_model=VoiceResponse)
+def get_voice(session_id: str, request: Request) -> VoiceResponse:
     session = get_request_session(session_id, request)
     pipeline = session.voice_pipeline
     if pipeline is None:
-        return None
+        return VoiceResponse(available=False)
     result = pipeline.get_result()
     if result is None:
-        return None
+        return VoiceResponse(available=True, error=bool(pipeline.get_error()))
     import base64
 
     audio, text = result
     return VoiceResponse(
+        available=True,
         text=text,
         audio_base64=base64.b64encode(audio).decode("ascii") if audio else None,
     )

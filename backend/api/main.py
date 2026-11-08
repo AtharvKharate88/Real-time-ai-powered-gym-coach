@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Configure logging and report application lifecycle events."""
+    settings.validate_production()
     configure_logging()
     logger.info("Starting FastAPI backend in %s environment", settings.environment)
     yield

@@ -42,6 +42,12 @@ class WorkoutSession:
             return {"pose_detected": False}
         return self.processor.get_latest_metrics() or {"pose_detected": False}
 
+    def form_score(self) -> int | None:
+        if self.processor is None:
+            return None
+        get_score = getattr(self.processor, "get_form_score", None)
+        return get_score() if callable(get_score) else None
+
     def elapsed_seconds(self) -> int:
         if self.started_at is None:
             return int(self.elapsed_before_pause)

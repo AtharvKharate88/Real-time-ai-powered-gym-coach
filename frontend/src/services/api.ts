@@ -34,16 +34,29 @@ export interface WorkoutMetrics {
   current_set_reps: number;
   workout_completed: boolean;
   elapsed_seconds: number;
+  form_score: number | null;
   metrics: Record<string, number | string | boolean>;
 }
 
 export interface VoiceResponse {
-  text: string;
+  available: boolean;
+  text: string | null;
   audio_base64: string | null;
+  error: boolean;
 }
 
 export interface HistoryEntry {
   exercise_name: string;
+  reps: number;
+  sets: number;
+  time: number;
+  form_score?: number | null;
+  set_breakdown?: number[] | null;
+  created_at: string;
+}
+
+export interface ManualWorkoutInput {
+  exercise_name: Exercise;
   reps: number;
   sets: number;
   time: number;
@@ -171,6 +184,13 @@ export function getVoice(sessionId: string): Promise<VoiceResponse | null> {
 
 export function getWorkoutHistory(): Promise<HistoryEntry[]> {
   return request<HistoryEntry[]>("/api/workouts/history");
+}
+
+export function addManualWorkout(input: ManualWorkoutInput): Promise<HistoryEntry> {
+  return request<HistoryEntry>("/api/workouts/history/manual", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
 export function submitWebRTCOffer(

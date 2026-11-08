@@ -1,95 +1,111 @@
-import { useState, type MouseEvent, type SyntheticEvent } from "react";
+import { useState } from "react";
+import type { AuthUser } from "../services/api";
 import BackendStatus from "./BackendStatus";
 import AuthStatus from "./AuthStatus";
+import ExerciseIllustration from "./ExerciseIllustration";
+import { exerciseOptions } from "./exerciseOptions";
 
-const galleryImages = [
-  ["i1.png", "Squat form analysis", "card-tilt-left card-float-1"],
-  ["i2.png", "Deadlift posture feedback", "card-center card-float-2"],
-  ["i3.png", "Overhead press alignment", "card-tilt-right card-float-3"],
-  ["i4.png", "Overhead press alignment", "card-tilt-right card-float-4"],
-  ["i5.png", "Overhead press alignment", "card-center card-float-5"],
-  ["i6.png", "Overhead press alignment", "card-tilt-left card-float-6"],
+const features = [
+  { icon: "◎", title: "See your movement", copy: "Camera based pose tracking follows your body as you exercise." },
+  { icon: "↗", title: "Count each rep", copy: "Live rep and set counts keep your session on track." },
+  { icon: "⌁", title: "Get form tips", copy: "Clear cues help you make small adjustments while you move." },
+  { icon: "♪", title: "Hear your coach", copy: "Optional spoken tips keep feedback easy to follow during a session." },
+  { icon: "◷", title: "Keep your progress", copy: "Your sessions are saved to your account so you can look back." },
 ];
 
-function markImageMissing(event: SyntheticEvent<HTMLImageElement>) {
-  event.currentTarget.parentElement?.classList.add("img-placeholder");
+interface LandingPageProps {
+  onWorkout: () => void;
+  onDashboard: () => void;
+  user: AuthUser | null;
+  authLoading: boolean;
+  authNotice: boolean;
+  onSignOut: () => void;
 }
 
-function navigateToLogin(event: MouseEvent<HTMLAnchorElement>, onWorkout: () => void) {
-  event.preventDefault();
-  onWorkout();
-}
+export default function LandingPage({ onWorkout, onDashboard, user, authLoading, authNotice, onSignOut }: LandingPageProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const primaryAction = user ? onDashboard : onWorkout;
 
-export default function LandingPage({ onWorkout }: { onWorkout: () => void }) {
-  const [videoMissing, setVideoMissing] = useState(false);
+  function closeMenu() {
+    setMenuOpen(false);
+  }
 
   return (
-    <>
-      <div className="grid-overlay" aria-hidden="true" />
-      <nav className="nav">
-        <div className="nav-logo">
-          <span className="logo-bracket">(</span>AI GYM COACH
-          <span className="logo-bracket">)</span>
-        </div>
-        <div className="nav-links">
-          <a href="#visuals">Gallery</a>
-          <a href="#demo">Demo</a>
-          <a href="#contact">Contact</a>
-          <BackendStatus />
-          <AuthStatus />
-        </div>
-      </nav>
+    <div className="site-shell">
+      <header className="site-header">
+        <a className="site-brand" href="#home" aria-label="AI Gym Coach home">
+          <span className="brand-mark">A</span><span>AI Gym Coach<small>TRAIN WITH INTENTION</small></span>
+        </a>
+        <button className="mobile-menu-toggle" type="button" aria-expanded={menuOpen} aria-controls="site-navigation" onClick={() => setMenuOpen((open) => !open)}>
+          <span>{menuOpen ? "Close" : "Menu"}</span><span className="menu-glyph" aria-hidden="true">{menuOpen ? "×" : "☰"}</span>
+        </button>
+        <nav id="site-navigation" className={`site-navigation${menuOpen ? " is-open" : ""}`} aria-label="Main navigation">
+          <a href="#features" onClick={closeMenu}>Features</a>
+          <a href="#exercises" onClick={closeMenu}>Exercises</a>
+          <a href="#about" onClick={closeMenu}>About</a>
+          <div className="site-nav-meta"><BackendStatus /><AuthStatus user={user} loading={authLoading} onSignOut={onSignOut} /></div>
+          <button className="button button-small button-primary" type="button" disabled={authLoading} onClick={() => { closeMenu(); primaryAction(); }}>
+            {authLoading ? "Checking account" : user ? "Open dashboard" : "Sign in"}
+          </button>
+        </nav>
+      </header>
+
       <main>
-        <section className="hero" id="hero">
-          <div className="hero-tag"><span className="dot" /><span>AI-POWERED · REAL-TIME · GYM COACH</span></div>
-          <h1 className="hero-title"><span className="line-one">REAL-TIME</span><span className="line-two">AI GYM<br />COACH</span></h1>
-          <p className="hero-sub">Your form. Analyzed. Corrected. In milliseconds.<br />Computer vision that watches every rep and tells you exactly what to fix.</p>
-          <div className="hero-cta-row">
-            <a href="#login" className="btn-primary" id="cta-button" onClick={(event) => navigateToLogin(event, onWorkout)}><span>Start Workout</span><span aria-hidden="true">→</span></a>
-            <a href="#demo-video" className="btn-ghost">WATCH DEMO ↓</a>
+        <section className="hero-section" id="home">
+          <div className="hero-copy">
+            <div className="eyebrow"><span className="status-dot" />YOUR PERSONAL AI TRAINING PARTNER</div>
+            <h1>Train smarter.<br /><span>Move better.</span><br />Get stronger.</h1>
+            <p>Your personal AI gym coach. Track every rep, improve your form, and get real-time coaching with your camera.</p>
+            <div className="hero-actions">
+              <button className="button button-primary" type="button" disabled={authLoading} onClick={primaryAction}>
+                {authLoading ? "Checking account" : user ? "Open dashboard" : "Start training"}<span aria-hidden="true">→</span>
+              </button>
+              <a className="button button-secondary" href="#features">Explore features</a>
+            </div>
+            {authNotice ? <p className="inline-alert" role="alert">Sign in with Google before starting a workout.</p> : null}
+            <div className="hero-proof"><span className="proof-icon">✓</span><span>Works with your webcam</span><span className="proof-divider" /><span>5 supported exercises</span></div>
           </div>
-          <div className="metrics-strip">
-            <div className="metric"><span className="metric-val">100<span className="unit">ms</span></span><span className="metric-label">Avg Latency</span></div>
-            <div className="metric-divider" />
-            <div className="metric"><span className="metric-val">5<span className="unit">+</span></span><span className="metric-label">Exercises</span></div>
-            <div className="metric-divider" />
-            <div className="metric"><span className="metric-val">95<span className="unit">%</span></span><span className="metric-label">Form Accuracy</span></div>
-          </div>
-        </section>
-
-        <section className="visuals" id="visuals">
-          <div className="section-header center-header"><span className="section-tag">// GALLERY</span><h2 className="section-title">Built for<br /><em>real athletes</em></h2></div>
-          <div className="card-grid">
-            {galleryImages.map(([image, alt, classes]) => (
-              <div className={`img-card ${classes}`} key={image}>
-                <div className="card-inner"><div className="card-img-wrap">
-                  <img src={`/IMGs/${image}`} alt={alt} onError={markImageMissing} /><div className="card-scan-line" />
-                </div><div className="card-corner tl" /><div className="card-corner tr" /><div className="card-corner bl" /><div className="card-corner br" /></div>
-              </div>
-            ))}
+          <div className="hero-art-wrap">
+            <div className="hero-art-glow" aria-hidden="true" />
+            <div className="hero-art-frame"><ExerciseIllustration exercise="Squats" className="hero-illustration" />
+              <div className="hero-art-caption"><span className="live-indicator" /><div><strong>Live form guidance</strong><span>Move at your own pace</span></div><span className="caption-signal" aria-hidden="true">•••</span></div>
+            </div>
+            <div className="floating-note note-top"><span className="note-icon">◎</span><span><strong>Body tracking</strong><small>Camera based</small></span></div>
+            <div className="floating-note note-bottom"><span className="note-icon note-check">✓</span><span><strong>Coach is ready</strong><small>Start when you are</small></span></div>
           </div>
         </section>
 
-        <section className="demo" id="demo">
-          <div className="section-header center-header"><span className="section-tag">// DEMO</span><h2 className="section-title">See it in<br /><em>action</em></h2><p className="section-desc">Watch the AI detect and correct form errors in real-time. No hardware required — just your phone or webcam.</p></div>
-          <div className="video-wrapper" id="demo-video"><div className="video-glow" /><div className="video-container">
-            <div className="video-corner tl" /><div className="video-corner tr" /><div className="video-corner bl" /><div className="video-corner br" />
-            <div className="video-status"><span className="dot pulse-dot" /><span>DEMO</span></div>
-            {videoMissing ? <div className="video-placeholder">DEMO VIDEO NOT AVAILABLE<span>Add frontend/public/videos/video.mp4 to enable playback.</span></div> : <video src="/videos/video.mp4" controls playsInline onError={() => setVideoMissing(true)} />}
-          </div></div>
-          <div className="feature-row">{["Pose Detection", "Audio Feedback", "Rep Counter", "Works in Real-time"].map((feature) => <div className="feature" key={feature}><span className="feature-icon">⬡</span><strong>{feature}</strong></div>)}</div>
+        <section className="feature-section content-section" id="features">
+          <div className="section-intro"><span className="eyebrow">A LITTLE MORE FOCUS, EVERY REP</span><h2>Training that pays<br />attention.</h2><p>Useful guidance while you train, with your progress saved for next time.</p></div>
+          <div className="feature-grid">{features.map((feature, index) => <article className="feature-card" key={feature.title}>
+            <div className="feature-card-top"><span className="feature-icon">{feature.icon}</span><span className="feature-index">0{index + 1}</span></div>
+            <h3>{feature.title}</h3><p>{feature.copy}</p>
+          </article>)}</div>
         </section>
 
-        <section className="contact" id="contact"><div className="contact-inner">
-          <span className="section-tag">// LET&apos;S CONNECT</span><h2 className="contact-title">Built by a human.<br /><em>Backed by data.</em></h2><p className="contact-desc">Open to opportunities in ML engineering, computer vision, and AI product roles.</p>
-          <div className="social-grid">
-            <a href="https://www.linkedin.com/in/prince-khunt-linked-in/" target="_blank" rel="noopener noreferrer" className="social-btn"><span className="social-label">LinkedIn</span></a>
-            <a href="https://github.com/PrinceKhunt16" target="_blank" rel="noopener noreferrer" className="social-btn"><span className="social-label">GitHub</span></a>
-            <a href="https://twitter.com/prince_khunt_" target="_blank" rel="noopener noreferrer" className="social-btn"><span className="social-label">Twitter</span></a>
-            <a href="mailto:princekhunt04@gmail.com" className="social-btn"><span className="social-label">Gmail</span></a>
+        <section className="exercise-showcase content-section" id="exercises">
+          <div className="section-heading-row"><div><span className="eyebrow">YOUR MOVEMENT LIBRARY</span><h2>Five moves.<br /><span>One focused coach.</span></h2></div><p>Choose a movement, get your camera set up, and the coach will take it from there.</p></div>
+          <div className="landing-exercise-grid">{exerciseOptions.map((exercise) => <article className="landing-exercise-card" key={exercise.name}>
+            <ExerciseIllustration exercise={exercise.name} />
+            <div className="landing-exercise-info"><div><h3>{exercise.name}</h3><span>{exercise.difficulty}</span></div><p>{exercise.description}</p><small>{exercise.muscles}</small></div>
+          </article>)}</div>
+          <div className="showcase-action"><button className="button button-primary" type="button" disabled={authLoading} onClick={primaryAction}>{user ? "Go to your dashboard" : "Choose your first workout"}<span aria-hidden="true">→</span></button></div>
+        </section>
+
+        <section className="about-section content-section" id="about">
+          <div className="about-mark" aria-hidden="true">A</div>
+          <div><span className="eyebrow">BUILT AROUND YOUR MOVEMENT</span><h2>A more thoughtful<br />way to train.</h2><p>AI Gym Coach uses your camera to follow supported exercises, count repetitions, and offer simple form cues. It keeps your workout history so you can see your effort add up.</p>
+            <button type="button" className="text-button" onClick={primaryAction} disabled={authLoading}>{user ? "Open your dashboard" : "Get started"}<span aria-hidden="true">→</span></button>
           </div>
-        </div><footer className="footer"><span>© 2026 AI GYM Trainer — Real-time AI Gym Trainer</span></footer></section>
+        </section>
       </main>
-    </>
+
+      <footer className="site-footer">
+        <a className="site-brand" href="#home"><span className="brand-mark">A</span><span>AI Gym Coach<small>TRAIN WITH INTENTION</small></span></a>
+        <p>Personal training feedback, powered by computer vision.</p>
+        <div className="footer-links"><a href="https://github.com/AtharvKharate88" target="_blank" rel="noopener noreferrer">GitHub</a><a href="https://www.linkedin.com/in/atharv-kharate-8ab34032b?utm_source=share_via&amp;utm_content=profile&amp;utm_medium=member_android" target="_blank" rel="noopener noreferrer">LinkedIn</a><a href="mailto:atharvkharate7799@gmail.com">Email</a></div>
+        <small>© {new Date().getFullYear()} AI Gym Coach</small>
+      </footer>
+    </div>
   );
 }

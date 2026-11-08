@@ -28,6 +28,7 @@ class ProcessedVideoTrack(VideoStreamTrack):
         self._reader = None
         self._processor = None
         self._timestamp_origin = time.monotonic()
+        self._dropped_frames = 0
 
     async def recv(self):
         if self._reader is None:
@@ -40,17 +41,21 @@ class ProcessedVideoTrack(VideoStreamTrack):
             frame = await self.source.recv()
             if self._source_frames.full():
                 self._source_frames.get_nowait()
+                self._dropped_frames += 1
             await self._source_frames.put(frame)
 
     async def _process_frames(self):
         while True:
             frame = await self._source_frames.get()
             if self.session.status == "running":
-                frame = await asyncio.to_thread(self.processor.recv, frame)
+                dropped = self._dropped_frames
+                self._dropped_frames = 0
+                frame = await asyncio.to_thread(self.processor.recv, frame, dropped)
             frame.pts = int((time.monotonic() - self._timestamp_origin) * 90_000)
             frame.time_base = Fraction(1, 90_000)
             if self._frames.full():
                 self._frames.get_nowait()
+                self._dropped_frames += 1
             await self._frames.put(frame)
 
     def stop(self) -> None:

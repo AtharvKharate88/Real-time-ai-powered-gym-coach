@@ -2,6 +2,8 @@ import sys
 import unittest
 from http.cookies import SimpleCookie
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from dotenv import load_dotenv
 
@@ -10,7 +12,7 @@ sys.path.insert(0, str(BACKEND_DIR))
 load_dotenv(BACKEND_DIR / ".env", override=True)
 
 from api.config import settings  # noqa: E402
-from api.routes.auth import logout  # noqa: E402
+from api.routes.auth import google_callback, logout  # noqa: E402
 
 
 class LogoutCookieTests(unittest.TestCase):
@@ -28,6 +30,22 @@ class LogoutCookieTests(unittest.TestCase):
         self.assertEqual(session_cookie["path"], "/")
         self.assertEqual(session_cookie["samesite"].lower(), "lax")
         self.assertEqual(bool(session_cookie["secure"]), settings.cookie_secure)
+
+
+class OAuthCallbackTests(unittest.IsolatedAsyncioTestCase):
+    async def test_google_callback_returns_authenticated_user_to_dashboard(self) -> None:
+        user = SimpleNamespace(id=1, email="athlete@example.com")
+        with (
+            patch("api.routes.auth.validate_state"),
+            patch("api.routes.auth.exchange_code", return_value={"id_token": "verified-token"}),
+            patch("api.routes.auth.verify_id_token", return_value={"sub": "google-user"}),
+            patch("api.routes.auth.upsert_google_user", return_value=user),
+            patch("api.routes.auth.create_session_token", return_value="session-token"),
+        ):
+            response = await google_callback(code="oauth-code", state="valid-state")
+
+        self.assertEqual(response.headers["location"], settings.frontend_origin + "/?view=dashboard")
+        self.assertIn(settings.auth_cookie_name, response.headers["set-cookie"])
 
 
 if __name__ == "__main__":

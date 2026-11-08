@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+from collections import deque
 
 _LOGGER = logging.getLogger("gymcoach")
 _configured = False
@@ -92,6 +93,7 @@ class VideoStats:
         self.infer_ms = 0.0
         self.detect_ms = 0.0
         self.recv_ms = 0.0
+        self.samples = deque(maxlen=120)
 
     def record(self, recv_ms, infer_ms, detect_ms, dropped):
         self.processed += 1
@@ -99,6 +101,7 @@ class VideoStats:
         self.recv_ms = recv_ms
         self.infer_ms = infer_ms
         self.detect_ms = detect_ms
+        self.samples.append((recv_ms, infer_ms, detect_ms))
         now = time.perf_counter()
         elapsed = now - self.last_report_at
         if elapsed < 2.0:
@@ -106,11 +109,18 @@ class VideoStats:
         frames = self.processed - self.last_processed
         dropped_delta = self.dropped - self.last_dropped
         fps = frames / elapsed if elapsed else 0.0
+        recv_values = sorted(sample[0] for sample in self.samples)
+        infer_values = sorted(sample[1] for sample in self.samples)
+        p95_index = int((len(self.samples) - 1) * 0.95)
+        recv_p95 = recv_values[p95_index]
+        infer_p95 = infer_values[p95_index]
+        dropped_percent = (100 * self.dropped / (self.processed + self.dropped)) if self.processed + self.dropped else 0
         log(
             f"[VIDEO] Incoming/processed FPS={fps:.1f} "
-            f"recv={self.recv_ms:.0f}ms mediapipe={self.infer_ms:.0f}ms "
-            f"detector={self.detect_ms:.0f}ms stale_dropped={dropped_delta} "
-            f"total_dropped={self.dropped}"
+            f"recv_last={self.recv_ms:.0f}ms recv_p95={recv_p95:.0f}ms "
+            f"mediapipe_last={self.infer_ms:.0f}ms mediapipe_p95={infer_p95:.0f}ms "
+            f"detector_last={self.detect_ms:.0f}ms stale_dropped={dropped_delta} "
+            f"dropped_total={self.dropped} dropped_percent={dropped_percent:.1f}%"
         )
         self.last_report_at = now
         self.last_processed = self.processed

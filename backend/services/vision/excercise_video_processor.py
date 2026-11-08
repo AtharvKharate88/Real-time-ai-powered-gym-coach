@@ -14,6 +14,7 @@ from detectors.shoulder_press import ShoulderPressDetector
 from detectors.lunges import LungesDetector
 from services.config.workout_config import POSE_CONNECTIONS
 from services.diagnostics import VideoStats, log
+from services.vision.form_score import FormScoreAccumulator
 
 
 class VideoProcessorClass:
@@ -27,6 +28,7 @@ class VideoProcessorClass:
         self._landmarker_error = None
         self._frame_timestamps_ms = 0
         self._stats = VideoStats()
+        self._form_score = FormScoreAccumulator()
         self._detectors = {
             "Squats": SquatDetector(),
             "Push-ups": PushUpDetector(),
@@ -76,6 +78,9 @@ class VideoProcessorClass:
     def get_latest_metrics(self):
         with self._lock:
             return None if self._latest_metrics is None else self._latest_metrics.copy()
+
+    def get_form_score(self) -> int | None:
+        return self._form_score.get_score()
 
     def set_exercise(self, exercise_type):
         with self._lock:
@@ -242,7 +247,10 @@ class VideoProcessorClass:
                     2,
                     cv2.LINE_AA,
                 )
-            self.set_latest_metrics({"pose_detected": False})
+            self.set_latest_metrics({
+                "pose_detected": False,
+                "pose_status": "unavailable" if self._landmarker_error else "loading",
+            })
         else:
             infer_image = image
             height, width = image.shape[:2]
@@ -261,6 +269,9 @@ class VideoProcessorClass:
                 result = landmarker.detect_for_video(mp_image, timestamp_ms)
             except Exception as error:
                 log(f"[VIDEO] MediaPipe inference failed: {error}")
+                latest_metrics = self.get_latest_metrics() or {}
+                latest_metrics.update({"pose_detected": False, "pose_status": "error"})
+                self.set_latest_metrics(latest_metrics)
                 recv_ms = (time.perf_counter() - recv_started) * 1000
                 self._stats.record(recv_ms, 0.0, 0.0, dropped)
                 return av.VideoFrame.from_ndarray(image, format="bgr24")
@@ -275,12 +286,15 @@ class VideoProcessorClass:
                     metrics = detector.process(landmarks)
                     detect_ms = (time.perf_counter() - detect_started) * 1000
                     metrics["pose_detected"] = True
+                    metrics["pose_status"] = "detected"
+                    self._form_score.record(metrics)
                     self._draw_overlays(image, metrics, ex_type)
                     self.set_latest_metrics(metrics)
             else:
                 self._draw_no_pose_warnings(image)
                 latest_metrics = self.get_latest_metrics() or {}
                 latest_metrics["pose_detected"] = False
+                latest_metrics["pose_status"] = "not_detected"
                 self.set_latest_metrics(latest_metrics)
         recv_ms = (time.perf_counter() - recv_started) * 1000
         self._stats.record(recv_ms, infer_ms, detect_ms, dropped)

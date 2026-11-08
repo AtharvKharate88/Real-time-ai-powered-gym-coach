@@ -4,6 +4,7 @@ import os
 import sys
 import unittest
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -57,6 +58,9 @@ class NeonWorkoutIntegrationTests(unittest.TestCase):
                 def get_latest_metrics(self) -> dict[str, int | bool]:
                     return {"reps": 10, "pose_detected": True}
 
+                def get_form_score(self) -> int:
+                    return 84
+
             owner = TestClient(app)
             owner.cookies.set(settings.auth_cookie_name, tokens[0])
             database_health = owner.get("/api/health/database")
@@ -84,11 +88,29 @@ class NeonWorkoutIntegrationTests(unittest.TestCase):
             completion = owner.get(f"/api/workouts/sessions/{session_id}/metrics")
             self.assertEqual(completion.status_code, 200)
             self.assertTrue(completion.json()["workout_completed"])
+            self.assertEqual(completion.json()["form_score"], 84)
+
+            manual_time = datetime(2026, 10, 31, 12, tzinfo=timezone.utc)
+            manual = owner.post(
+                "/api/workouts/history/manual",
+                json={
+                    "exercise_name": "Lunges",
+                    "reps": 18,
+                    "sets": 3,
+                    "time": 540,
+                    "created_at": manual_time.isoformat(),
+                },
+            )
+            self.assertEqual(manual.status_code, 201)
+            self.assertEqual(manual.json()["created_at"], manual_time.isoformat())
 
             history = owner.get("/api/workouts/history")
             self.assertEqual(history.status_code, 200)
-            self.assertEqual(len(history.json()), 1)
-            self.assertEqual(history.json()[0]["reps"], 10)
+            self.assertEqual(len(history.json()), 2)
+            tracked_entry = next(item for item in history.json() if item["exercise_name"] == "Squats")
+            self.assertEqual(tracked_entry["reps"], 10)
+            self.assertEqual(tracked_entry["form_score"], 84)
+            self.assertEqual(tracked_entry["set_breakdown"], [10])
             self.assertIsInstance(history.json()[0]["created_at"], str)
 
             with SessionLocal() as db:
@@ -97,6 +119,8 @@ class NeonWorkoutIntegrationTests(unittest.TestCase):
                 )
                 self.assertIsNotNone(persisted)
                 self.assertEqual(persisted.reps, 10)
+                self.assertEqual(persisted.form_score, 84)
+                self.assertEqual(persisted.set_breakdown, [10])
 
             other_user = TestClient(app)
             other_user.cookies.set(settings.auth_cookie_name, tokens[1])

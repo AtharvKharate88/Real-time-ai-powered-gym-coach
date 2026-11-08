@@ -1,5 +1,6 @@
 """Workout and WebRTC API schemas."""
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -34,6 +35,7 @@ class WorkoutMetricsResponse(BaseModel):
     current_set_reps: int
     workout_completed: bool
     elapsed_seconds: int
+    form_score: int | None = None
     metrics: dict[str, int | str | bool]
 
 
@@ -43,8 +45,10 @@ class SessionActionResponse(BaseModel):
 
 
 class VoiceResponse(BaseModel):
-    text: str
+    available: bool
+    text: str | None = None
     audio_base64: str | None = None
+    error: bool = False
 
 
 class HistoryEntry(BaseModel):
@@ -52,7 +56,23 @@ class HistoryEntry(BaseModel):
     reps: int
     sets: int
     time: float
+    form_score: int | None = None
+    set_breakdown: list[int] | None = None
     created_at: str
+
+
+class ManualWorkoutRequest(BaseModel):
+    exercise_name: Literal[
+        "Squats",
+        "Push-ups",
+        "Biceps Curls (Dumbbell)",
+        "Shoulder Press",
+        "Lunges",
+    ]
+    reps: int = Field(ge=0, le=5000)
+    sets: int = Field(ge=1, le=100)
+    time: float = Field(ge=0, le=86400)
+    created_at: datetime
 
 
 class WebRTCOffer(BaseModel):

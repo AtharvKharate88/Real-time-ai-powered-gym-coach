@@ -23,6 +23,7 @@ class HistorySerializationTests(unittest.TestCase):
             "reps": 10,
             "sets": 1,
             "time": 33.5,
+            "form_score": 82,
             "created_at": created_at,
         }
         with patch(
@@ -30,6 +31,7 @@ class HistorySerializationTests(unittest.TestCase):
         ):
             history = get_history(7)
         self.assertEqual(history[0]["created_at"], created_at.isoformat())
+        self.assertEqual(history[0]["form_score"], 82)
 
 
 if __name__ == "__main__":
