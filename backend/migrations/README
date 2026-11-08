@@ -1,0 +1,11 @@
+# Alembic migrations
+
+Alembic loads `backend/.env` and requires `DIRECT_DATABASE_URL` to point to the Neon direct endpoint. Application requests use the pooled `DATABASE_URL` configured in `backend/database/engine.py`.
+
+Run migrations from the repository root:
+
+```powershell
+python -m alembic -c backend/alembic.ini upgrade head
+```
+
+The SQLite-to-Neon data transfer is a separate one-time operation documented in the repository's `MIGRATION_CHECKLIST.md`.

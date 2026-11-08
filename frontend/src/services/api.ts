@@ -3,6 +3,13 @@ export interface HealthResponse {
   message: string;
 }
 
+export interface AuthUser {
+  id: number;
+  email: string;
+  full_name: string | null;
+  picture_url: string | null;
+}
+
 export type Exercise =
   | "Squats"
   | "Push-ups"
@@ -82,6 +89,7 @@ async function request<T>(
   try {
     response = await fetch(`${apiBaseUrl}${path}`, {
       ...options,
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...options.headers,
@@ -104,6 +112,24 @@ async function request<T>(
 
 export function getHealth(): Promise<HealthResponse> {
   return request<HealthResponse>("/api/health");
+}
+
+export function getCurrentUser(): Promise<AuthUser> {
+  return request<AuthUser>("/api/auth/me");
+}
+
+export function loginWithGoogle(): void {
+  if (!apiBaseUrl) {
+    throw new ApiError(
+      "VITE_API_BASE_URL is not configured. Restart Vite after creating frontend/.env.",
+      0,
+    );
+  }
+  window.location.assign(`${apiBaseUrl}/api/auth/google/login`);
+}
+
+export function logout(): Promise<{ status: string }> {
+  return request<{ status: string }>("/api/auth/logout", { method: "POST" });
 }
 
 export function createWorkoutSession(

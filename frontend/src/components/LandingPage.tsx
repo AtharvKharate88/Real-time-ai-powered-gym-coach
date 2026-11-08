@@ -1,5 +1,6 @@
 import { useState, type MouseEvent, type SyntheticEvent } from "react";
 import BackendStatus from "./BackendStatus";
+import AuthStatus from "./AuthStatus";
 
 const galleryImages = [
   ["i1.png", "Squat form analysis", "card-tilt-left card-float-1"],
@@ -35,6 +36,7 @@ export default function LandingPage({ onWorkout }: { onWorkout: () => void }) {
           <a href="#demo">Demo</a>
           <a href="#contact">Contact</a>
           <BackendStatus />
+          <AuthStatus />
         </div>
       </nav>
       <main>

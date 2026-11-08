@@ -10,9 +10,9 @@ from fastapi.responses import JSONResponse
 from .config import settings
 from .logging_config import configure_logging
 from .routes.health import router as health_router
+from .routes.auth import router as auth_router
 from .routes.webrtc import router as webrtc_router
 from .routes.workouts import router as workouts_router
-from .services.persistence import initialize_database
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 async def lifespan(_: FastAPI):
     """Configure logging and report application lifecycle events."""
     configure_logging()
-    initialize_database()
     logger.info("Starting FastAPI backend in %s environment", settings.environment)
     yield
     logger.info("Stopping FastAPI backend")
@@ -54,5 +53,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 
 app.include_router(health_router)
+app.include_router(auth_router)
 app.include_router(workouts_router)
 app.include_router(webrtc_router)

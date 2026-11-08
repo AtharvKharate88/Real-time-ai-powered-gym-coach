@@ -5,7 +5,6 @@ import av
 import numpy as np
 import mediapipe as mp
 import threading
-from streamlit_webrtc import VideoProcessorBase
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from detectors.squat import SquatDetector
@@ -17,7 +16,7 @@ from services.config.workout_config import POSE_CONNECTIONS
 from services.diagnostics import VideoStats, log
 
 
-class VideoProcessorClass(VideoProcessorBase):
+class VideoProcessorClass:
     _INFER_MAX_WIDTH = 320
 
     def __init__(self):

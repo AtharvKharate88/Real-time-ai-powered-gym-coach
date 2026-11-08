@@ -6,10 +6,10 @@ import time
 from fractions import Fraction
 
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from ..schemas.workout import WebRTCAnswer, WebRTCOffer
-from ..services.workout_sessions import session_manager
+from ..services.workout_access import get_request_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/webrtc", tags=["webrtc"])
@@ -64,10 +64,10 @@ class ProcessedVideoTrack(VideoStreamTrack):
 
 
 @router.post("/offer", response_model=WebRTCAnswer)
-async def receive_offer(session_id: str, offer: WebRTCOffer) -> WebRTCAnswer:
-    session = session_manager.get(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Workout session not found")
+async def receive_offer(
+    session_id: str, offer: WebRTCOffer, request: Request
+) -> WebRTCAnswer:
+    session = get_request_session(session_id, request)
 
     try:
         processor = session.ensure_processor()

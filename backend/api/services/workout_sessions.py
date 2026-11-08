@@ -18,6 +18,7 @@ class WorkoutSession:
     exercise: str
     target_sets: int
     reps_per_set: int
+    user_id: int | None = None
     processor: Any = field(default=None, init=False)
     status: str = "ready"
     peer_connection: object | None = None
@@ -110,9 +111,15 @@ class WorkoutSessionManager:
         self._sessions: dict[str, WorkoutSession] = {}
         self._lock = threading.Lock()
 
-    def create(self, exercise: str, target_sets: int, reps_per_set: int) -> tuple[str, WorkoutSession]:
+    def create(
+        self,
+        exercise: str,
+        target_sets: int,
+        reps_per_set: int,
+        user_id: int | None = None,
+    ) -> tuple[str, WorkoutSession]:
         session_id = str(uuid.uuid4())
-        session = WorkoutSession(exercise, target_sets, reps_per_set)
+        session = WorkoutSession(exercise, target_sets, reps_per_set, user_id)
         with self._lock:
             self._sessions[session_id] = session
         return session_id, session

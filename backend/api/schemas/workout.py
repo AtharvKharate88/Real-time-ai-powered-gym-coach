@@ -51,7 +51,7 @@ class HistoryEntry(BaseModel):
     exercise_name: str
     reps: int
     sets: int
-    time: int
+    time: float
     created_at: str
 
 

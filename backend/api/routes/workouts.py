@@ -1,6 +1,6 @@
 """Workout session endpoints."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Request
 
 from ..schemas.workout import (
     CreateWorkoutRequest,
@@ -10,17 +10,12 @@ from ..schemas.workout import (
     HistoryEntry,
     VoiceResponse,
 )
+from ..services.auth import optional_current_user
 from ..services.persistence import add_exercise, get_history
+from ..services.workout_access import get_request_session
 from ..services.workout_sessions import session_manager
 
 router = APIRouter(prefix="/api/workouts", tags=["workouts"])
-
-
-def _session_or_404(session_id: str):
-    session = session_manager.get(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Workout session not found")
-    return session
 
 
 def _response(session_id: str, session) -> WorkoutSessionResponse:
@@ -34,16 +29,22 @@ def _response(session_id: str, session) -> WorkoutSessionResponse:
 
 
 @router.post("/sessions", response_model=WorkoutSessionResponse, status_code=201)
-def create_session(request: CreateWorkoutRequest) -> WorkoutSessionResponse:
+def create_session(
+    body: CreateWorkoutRequest, request: Request
+) -> WorkoutSessionResponse:
+    user = optional_current_user(request)
     session_id, session = session_manager.create(
-        request.exercise, request.target_sets, request.reps_per_set
+        body.exercise,
+        body.target_sets,
+        body.reps_per_set,
+        user_id=user.id if user is not None else None,
     )
     return _response(session_id, session)
 
 
 @router.get("/sessions/{session_id}/metrics", response_model=WorkoutMetricsResponse)
-def get_metrics(session_id: str) -> WorkoutMetricsResponse:
-    session = _session_or_404(session_id)
+def get_metrics(session_id: str, request: Request) -> WorkoutMetricsResponse:
+    session = get_request_session(session_id, request)
     metrics = session.metrics()
     reps = int(metrics.get("reps", 0))
     sets_completed = min(reps // session.reps_per_set, session.target_sets)
@@ -53,6 +54,7 @@ def get_metrics(session_id: str) -> WorkoutMetricsResponse:
         session.queue_voice_event("workout_completed", metrics)
         if not session.persisted and reps:
             add_exercise(
+                session.user_id,
                 session.exercise,
                 reps,
                 sets_completed,
@@ -80,28 +82,28 @@ def get_metrics(session_id: str) -> WorkoutMetricsResponse:
 
 
 @router.post("/sessions/{session_id}/start", response_model=SessionActionResponse)
-def start_session(session_id: str) -> SessionActionResponse:
-    session = _session_or_404(session_id)
+def start_session(session_id: str, request: Request) -> SessionActionResponse:
+    session = get_request_session(session_id, request)
     session.start()
     session.queue_voice_event("workout_started", session.metrics())
     return SessionActionResponse(session_id=session_id, status="running")
 
 
 @router.post("/sessions/{session_id}/resume", response_model=SessionActionResponse)
-def resume_session(session_id: str) -> SessionActionResponse:
-    return start_session(session_id)
+def resume_session(session_id: str, request: Request) -> SessionActionResponse:
+    return start_session(session_id, request)
 
 
 @router.post("/sessions/{session_id}/pause", response_model=SessionActionResponse)
-def pause_session(session_id: str) -> SessionActionResponse:
-    session = _session_or_404(session_id)
+def pause_session(session_id: str, request: Request) -> SessionActionResponse:
+    session = get_request_session(session_id, request)
     session.pause()
     return SessionActionResponse(session_id=session_id, status="paused")
 
 
 @router.post("/sessions/{session_id}/stop", response_model=SessionActionResponse)
-def stop_session(session_id: str) -> SessionActionResponse:
-    session = _session_or_404(session_id)
+def stop_session(session_id: str, request: Request) -> SessionActionResponse:
+    session = get_request_session(session_id, request)
     session.stop()
     metrics = session.metrics()
     session.queue_voice_event("workout_completed", metrics)
@@ -109,6 +111,7 @@ def stop_session(session_id: str) -> SessionActionResponse:
     sets_completed = min(reps // session.reps_per_set, session.target_sets)
     if not session.persisted and reps:
         add_exercise(
+            session.user_id,
             session.exercise,
             reps,
             sets_completed,
@@ -120,13 +123,17 @@ def stop_session(session_id: str) -> SessionActionResponse:
 
 
 @router.get("/history", response_model=list[HistoryEntry])
-def history() -> list[HistoryEntry]:
-    return [HistoryEntry(**entry) for entry in get_history()]
+def history(request: Request) -> list[HistoryEntry]:
+    user = optional_current_user(request)
+    return [
+        HistoryEntry(**entry)
+        for entry in get_history(user.id if user is not None else None)
+    ]
 
 
 @router.get("/sessions/{session_id}/voice", response_model=VoiceResponse | None)
-def get_voice(session_id: str) -> VoiceResponse | None:
-    session = _session_or_404(session_id)
+def get_voice(session_id: str, request: Request) -> VoiceResponse | None:
+    session = get_request_session(session_id, request)
     pipeline = session.voice_pipeline
     if pipeline is None:
         return None

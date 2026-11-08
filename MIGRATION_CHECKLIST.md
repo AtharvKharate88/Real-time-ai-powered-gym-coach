@@ -1,104 +1,55 @@
-# React + FastAPI migration checklist
+# Neon PostgreSQL migration
 
-This checklist records the Phase 1 audit of the existing Streamlit application and
-the current React/FastAPI foundation. Existing Streamlit functionality remains
-available as a reference and fallback.
+## Current architecture
 
-## Audited architecture
+- React calls the FastAPI API in `backend/api`.
+- FastAPI and the original application persistence helpers share one SQLAlchemy engine, session factory, ORM models, and repositories under `backend/database` and `backend/models`.
+- FastAPI traffic uses the Neon pooled `DATABASE_URL`; Alembic uses the direct `DIRECT_DATABASE_URL`.
+- Google OAuth is the existing sign-in flow. The first successful Google callback creates a `users` row; no password-based authentication was added.
+- Completed workouts are stored in PostgreSQL. Live webcam frames, pose results, timers, and counters remain in memory.
+- Signed-in workouts are associated with the owner and history is filtered by that user. Anonymous workouts remain unassigned and visible through the existing unauthenticated history route.
 
-| Area | Existing implementation | React + FastAPI status |
-| --- | --- | --- |
-| Landing page | `frontend/src/components/LandingPage.tsx` | Present |
-| Streamlit workout UI | `backend/main.py` | Preserved as fallback |
-| FastAPI entry point | `backend/api/main.py` | Workout and WebRTC routes |
-| Webcam transport | `streamlit_webrtc` in `backend/main.py` | React WebRTC + aiortc adapter |
-| MediaPipe inference | `backend/services/vision/excercise_video_processor.py` | Reused by API sessions |
-| Exercise detectors | `backend/detectors/*.py` | Reused unchanged by API sessions |
-| Rep/set state | Streamlit session state and processor state | API-owned per-session processor state |
-| SQLite persistence | `backend/services/persistence/exercise_repository.py` | API history persistence added |
-| Groq coaching | `backend/services/coaching/llm.py` | API session integration |
-| gTTS voice | `backend/services/coaching/tts.py` | API voice result endpoint |
-| Async voice pipeline | `backend/services/coaching/voice_pipeline.py` | Reused asynchronously by API sessions |
-| React API service | `frontend/src/services/api.ts` | Health endpoint integrated |
-| Backend status UI | `frontend/src/components/BackendStatus.tsx` | Present |
-| WebRTC API adapter | `backend/api/routes/webrtc.py` | Implemented; requires supported vision environment |
+## Configure the backend
 
-## Existing capabilities verified
+Copy `backend/.env.example` to `backend/.env` and set:
 
-- [x] Username login and SQLite user persistence
-- [x] Squat detector
-- [x] Push-up detector
-- [x] Biceps curl detector
-- [x] Shoulder press detector
-- [x] Lunge detector
-- [x] MediaPipe pose inference
-- [x] Skeleton and exercise overlays
-- [x] Rep counting and exercise-specific metrics
-- [x] Set counting and workout completion
-- [x] Streamlit workout controls and live metrics
-- [x] Workout history aggregation
-- [x] Groq coaching prompt and feedback logic
-- [x] gTTS audio generation
-- [x] Asynchronous voice queue, cooldowns, and stale-result replacement
-- [x] STUN/TURN configuration for the existing Streamlit WebRTC path
-- [x] Streamlit WebRTC frame dropping and video diagnostics
+```dotenv
+DATABASE_URL=postgresql+psycopg://ROLE:PASSWORD@YOUR-POOLER-HOST/DATABASE?sslmode=require
+DIRECT_DATABASE_URL=postgresql+psycopg://ROLE:PASSWORD@YOUR-DIRECT-HOST/DATABASE?sslmode=require
+```
 
-## Migration work remaining
+Keep the real URLs private. FastAPI validates that `DATABASE_URL` uses the Psycopg 3 driver and Neon pooler. Alembic validates that `DIRECT_DATABASE_URL` uses Psycopg 3 and is not pooled.
 
-### Backend integration
+## Create or update the schema
 
-- [x] Define Pydantic request/response schemas.
-- [x] Extract vision processing behind a FastAPI-compatible service boundary.
-- [x] Preserve detector instances per workout session.
-- [x] Add session lifecycle routes: initialize, start, pause, resume, stop.
-- [x] Expose metrics, form status, and workout summary data.
-- [x] Expose SQLite history without changing the database schema.
-- [x] Adapt Groq and gTTS to the API service boundary.
-- [x] Keep voice work asynchronous and non-blocking for frame processing.
-- [x] Keep Streamlit-only imports out of health/session initialization paths.
-- [x] Make the MediaPipe model path independent of the process working directory.
+From the repository root:
 
-### Frontend integration
+```powershell
+python -m pip install -r backend/requirements.txt
+python -m alembic -c backend/alembic.ini upgrade head
+```
 
-- [x] Add reusable workout page and control components.
-- [x] Add exercise selection and workout configuration.
-- [x] Add webcam permission and preview handling.
-- [x] Add the selected real-time transport client.
-- [x] Render processed video and workout metrics.
-- [x] Render form status and AI coach feedback.
-- [x] Add voice enable/disable and audio playback handling.
-- [x] Add timer, rep/set progress, pause/resume/stop, and history views.
-- [x] Add loading, permission, transport, and backend error states.
+The migrations create `users` and `exercises`, including Google identity fields and the user foreign key. Check connectivity through `GET /api/health/database`; it returns only a health status and does not expose database details.
 
-### Verification
+## Transfer the legacy SQLite records
 
-- [ ] Test each detector through the migrated API independently with real exercise videos.
-- [x] Test session state continuity across API metrics updates.
-- [x] Test start, pause, resume, stop, and metrics lifecycle behavior.
-- [x] Test missing coaching dependencies without stopping a workout.
-- [ ] Test camera denial, disconnect, reconnection, and cleanup on a real browser.
-- [x] Test React + FastAPI startup and WebRTC frame flow without Streamlit.
-- [x] Compare migrated service boundaries with the Streamlit reference.
+The one-time migration utility reads `backend/services/data.db` in read-only mode and inserts into Neon:
 
-## Current implementation slice
+```powershell
+python backend/scripts/migrate_sqlite_to_neon.py
+```
 
-- [x] FastAPI workout session schemas and in-memory session manager
-- [x] Session start, pause, stop, and metrics endpoints
-- [x] FastAPI WebRTC offer/answer adapter using `aiortc`
-- [x] React workout controls, webcam preview, processed-video preview, and metrics polling
-- [x] React WebRTC offer client
-- [x] API-backed SQLite history and user migration
-- [x] API-backed asynchronous Groq and gTTS feedback
-- [x] React workout controls, timer, metrics, coaching, voice, and history
+Use `--source` to choose another SQLite file. The utility preserves IDs and timestamps, maps missing or invalid user references to anonymous records, reports conflicts, and safely skips records already present. Review the inserted/skipped/conflict counts and compare source and Neon counts after running it.
 
-## Known migration risks
+Do not remove `backend/services/data.db` or its backup until the migrated data has been checked and confirmed. The application itself does not open SQLite; only the one-time migration utility reads the retained source.
 
-- The current vision processor subclasses `streamlit_webrtc.VideoProcessorBase`.
-- The API now resolves the MediaPipe model relative to the backend package.
-- Streamlit session state currently owns workout lifecycle and counters.
-- SQLite uses one cached cross-thread connection and is not a server-grade
-  multi-user storage layer.
-- Groq and Google TTS require external services and may be unavailable.
-- The default ICE configuration uses STUN only; restrictive networks may need
-  TURN.
-- No automated backend test suite was found during the audit.
+## Checks
+
+```powershell
+python -m unittest discover -s backend/tests -v
+python -m compileall -q backend/api backend/database backend/models backend/migrations backend/scripts backend/tests
+cd frontend
+npm run build
+```
+
+Camera hardware, real Google OAuth, and a real browser/WebRTC session require manual environment checks; the automated tests cover API session ownership, persistence serialization, database health behavior, and logout cookie clearing.
