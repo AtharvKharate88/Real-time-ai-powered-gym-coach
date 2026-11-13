@@ -1,6 +1,5 @@
 import { useState } from "react";
 import type { AuthUser } from "../services/api";
-import BackendStatus from "./BackendStatus";
 import AuthStatus from "./AuthStatus";
 import ExerciseIllustration from "./ExerciseIllustration";
 import { exerciseOptions } from "./exerciseOptions";
@@ -43,9 +42,9 @@ export default function LandingPage({ onWorkout, onDashboard, user, authLoading,
           <a href="#features" onClick={closeMenu}>Features</a>
           <a href="#exercises" onClick={closeMenu}>Exercises</a>
           <a href="#about" onClick={closeMenu}>About</a>
-          <div className="site-nav-meta"><BackendStatus /><AuthStatus user={user} loading={authLoading} onSignOut={onSignOut} /></div>
+          {user ? <div className="site-nav-meta"><AuthStatus user={user} loading={authLoading} onSignOut={onSignOut} /></div> : null}
           <button className="button button-small button-primary" type="button" disabled={authLoading} onClick={() => { closeMenu(); primaryAction(); }}>
-            {authLoading ? "Checking account" : user ? "Open dashboard" : "Sign in"}
+            {authLoading ? "Checking account" : user ? "Open dashboard" : "Sign in with Google"}
           </button>
         </nav>
       </header>
