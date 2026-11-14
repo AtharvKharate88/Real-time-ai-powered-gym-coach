@@ -83,6 +83,25 @@ export class ApiError extends Error {
   }
 }
 
+const HISTORY_KEY = "ai_gym_workout_history_v1";
+
+export function readLocalWorkoutHistory(): HistoryEntry[] {
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem(HISTORY_KEY) ?? "[]");
+    return Array.isArray(value) ? value as HistoryEntry[] : [];
+  } catch { return []; }
+}
+
+export function saveLocalWorkout(entry: HistoryEntry): HistoryEntry {
+  const history = [entry, ...readLocalWorkoutHistory()];
+  try { window.localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch { /* Private browsing may block storage. */ }
+  return entry;
+}
+
+export function addLocalManualWorkout(input: ManualWorkoutInput): HistoryEntry {
+  return saveLocalWorkout({ exercise_name: input.exercise_name, reps: input.reps, sets: input.sets, time: input.time, created_at: input.created_at });
+}
+
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
 const apiBaseUrl = configuredApiBaseUrl?.replace(/\/$/, "") ?? "";
 
@@ -158,6 +177,13 @@ export function createWorkoutSession(
       reps_per_set: repsPerSet,
     }),
   });
+}
+
+export function prepareWorkoutVision(exercise: Exercise): Promise<{ ready: boolean }> {
+  return request<{ ready: boolean }>(
+    `/api/workouts/vision/prepare?exercise=${encodeURIComponent(exercise)}`,
+    { method: "POST" },
+  );
 }
 
 export function updateWorkoutStatus(

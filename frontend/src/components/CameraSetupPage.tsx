@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AuthUser } from "../services/api";
+import type { AuthUser, Exercise } from "../services/api";
 import WorkoutFlowNav from "./WorkoutFlowNav";
 
 interface CameraSetupPageProps {
   user: AuthUser;
   cameraGuidance: string;
+  exercise: Exercise;
   onContinue: (stream: MediaStream) => void;
   onBack: () => void;
   onDashboard: () => void;
   onSignOut: () => void;
 }
 
-export default function CameraSetupPage({ user, cameraGuidance, onContinue, onBack, onDashboard, onSignOut }: CameraSetupPageProps) {
+export default function CameraSetupPage({ user, cameraGuidance, exercise, onContinue, onBack, onDashboard, onSignOut }: CameraSetupPageProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const cameraRequestRef = useRef<{ deviceId?: string; promise: Promise<void> } | null>(null);
@@ -38,8 +39,8 @@ export default function CameraSetupPage({ user, cameraGuidance, onContinue, onBa
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             ...(requestedDeviceId ? { deviceId: { exact: requestedDeviceId } } : {}),
-            width: { ideal: 640 },
-            height: { ideal: 480 },
+            width: { ideal: 640, max: 640 },
+            height: { ideal: 480, max: 480 },
             frameRate: { ideal: 15, max: 24 },
           },
           audio: false,
@@ -81,7 +82,7 @@ export default function CameraSetupPage({ user, cameraGuidance, onContinue, onBa
     return () => {
       if (!transferredRef.current) streamRef.current?.getTracks().forEach((track) => track.stop());
     };
-  }, [attempt, connectCamera]);
+  }, [attempt, connectCamera, exercise]);
 
   function continueToWorkout() {
     const stream = streamRef.current;

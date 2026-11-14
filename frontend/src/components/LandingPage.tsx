@@ -9,7 +9,7 @@ const features = [
   { icon: "↗", title: "Count each rep", copy: "Live rep and set counts keep your session on track." },
   { icon: "⌁", title: "Get form tips", copy: "Clear cues help you make small adjustments while you move." },
   { icon: "♪", title: "Hear your coach", copy: "Optional spoken tips keep feedback easy to follow during a session." },
-  { icon: "◷", title: "Keep your progress", copy: "Your sessions are saved to your account so you can look back." },
+  { icon: "◷", title: "Keep your progress", copy: "Your sessions stay on this device so you can look back." },
 ];
 
 interface LandingPageProps {
@@ -23,7 +23,7 @@ interface LandingPageProps {
 
 export default function LandingPage({ onWorkout, onDashboard, user, authLoading, authNotice, onSignOut }: LandingPageProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const primaryAction = user ? onDashboard : onWorkout;
+  const primaryAction = onWorkout;
 
   function closeMenu() {
     setMenuOpen(false);
@@ -44,7 +44,7 @@ export default function LandingPage({ onWorkout, onDashboard, user, authLoading,
           <a href="#about" onClick={closeMenu}>About</a>
           {user ? <div className="site-nav-meta"><AuthStatus user={user} loading={authLoading} onSignOut={onSignOut} /></div> : null}
           <button className="button button-small button-primary" type="button" disabled={authLoading} onClick={() => { closeMenu(); primaryAction(); }}>
-            {authLoading ? "Checking account" : user ? "Open dashboard" : "Sign in with Google"}
+            {authLoading ? "Getting ready" : user ? "Open dashboard" : "Start training"}
           </button>
         </nav>
       </header>
@@ -57,11 +57,11 @@ export default function LandingPage({ onWorkout, onDashboard, user, authLoading,
             <p>Your personal AI gym coach. Track every rep, improve your form, and get real-time coaching with your camera.</p>
             <div className="hero-actions">
               <button className="button button-primary" type="button" disabled={authLoading} onClick={primaryAction}>
-                {authLoading ? "Checking account" : user ? "Open dashboard" : "Start training"}<span aria-hidden="true">→</span>
+                {authLoading ? "Getting ready" : user ? "Open dashboard" : "Start training"}<span aria-hidden="true">→</span>
               </button>
               <a className="button button-secondary" href="#features">Explore features</a>
             </div>
-            {authNotice ? <p className="inline-alert" role="alert">Sign in with Google before starting a workout.</p> : null}
+            <p className="inline-alert">Pose tracking runs on your device. No account or API key required.</p>
             <div className="hero-proof"><span className="proof-icon">✓</span><span>Works with your webcam</span><span className="proof-divider" /><span>5 supported exercises</span></div>
           </div>
           <div className="hero-art-wrap">

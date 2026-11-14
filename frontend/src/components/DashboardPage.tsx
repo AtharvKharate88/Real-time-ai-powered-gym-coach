@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { AuthUser, Exercise, HistoryEntry } from "../services/api";
-import { addManualWorkout, getWorkoutHistory } from "../services/api";
+import { addLocalManualWorkout, readLocalWorkoutHistory } from "../services/api";
 
 type DashboardSection = "dashboard" | "history" | "profile" | "settings";
 const exerciseNames: Exercise[] = ["Squats", "Push-ups", "Biceps Curls (Dumbbell)", "Shoulder Press", "Lunges"];
@@ -35,10 +35,7 @@ export default function DashboardPage({ user, onWorkout, onSignOut }: { user: Au
 
   useEffect(() => {
     let active = true;
-    getWorkoutHistory()
-      .then((entries) => { if (active) setHistory(entries); })
-      .catch(() => { if (active) setError(true); })
-      .finally(() => { if (active) setLoading(false); });
+    if (active) { setHistory(readLocalWorkoutHistory()); setLoading(false); }
     return () => { active = false; };
   }, []);
 
@@ -88,7 +85,7 @@ export default function DashboardPage({ user, onWorkout, onSignOut }: { user: Au
     setManualSaving(true);
     setManualError("");
     try {
-      const saved = await addManualWorkout({
+      const saved = addLocalManualWorkout({
         exercise_name: String(form.get("exercise")) as Exercise,
         reps: Number(form.get("reps")),
         sets: Number(form.get("sets")),
@@ -100,7 +97,7 @@ export default function DashboardPage({ user, onWorkout, onSignOut }: { user: Au
       setCalendarMonth(new Date(date.getFullYear(), date.getMonth(), 1));
       setShowManualForm(false);
     } catch {
-      setManualError("We couldn’t save that workout. Check your connection and try again.");
+      setManualError("We couldn’t save that workout on this device.");
     } finally {
       setManualSaving(false);
     }
