@@ -5,9 +5,10 @@ import logging
 import time
 
 from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
+from aiortc.sdp import candidate_from_sdp
 from fastapi import APIRouter, HTTPException, Request
 
-from ..schemas.workout import WebRTCAnswer, WebRTCOffer
+from ..schemas.workout import WebRTCAnswer, WebRTCIceCandidate, WebRTCOffer
 from ..services.auth import current_user
 from ..services.ice_config import build_ice_servers
 from ..services.workout_access import get_request_session
@@ -165,3 +166,33 @@ async def receive_offer(
         sdp=peer_connection.localDescription.sdp,
         type=peer_connection.localDescription.type,
     )
+
+
+@router.post("/candidate")
+async def receive_candidate(
+    session_id: str,
+    candidate: WebRTCIceCandidate,
+    request: Request,
+) -> dict[str, bool]:
+    session = get_request_session(session_id, request)
+    peer_connection = session.peer_connection
+    if not isinstance(peer_connection, RTCPeerConnection):
+        raise HTTPException(status_code=409, detail="WebRTC offer is not ready for candidates.")
+
+    if not candidate.candidate:
+        await peer_connection.addIceCandidate(None)
+        return {"accepted": True}
+
+    candidate_line = candidate.candidate.removeprefix("candidate:")
+    try:
+        remote_candidate = candidate_from_sdp(candidate_line)
+    except (AssertionError, ValueError) as error:
+        raise HTTPException(status_code=400, detail="Invalid ICE candidate.") from error
+
+    remote_candidate.sdpMid = candidate.sdpMid
+    remote_candidate.sdpMLineIndex = candidate.sdpMLineIndex
+    if remote_candidate.sdpMid is None and remote_candidate.sdpMLineIndex is None:
+        raise HTTPException(status_code=400, detail="ICE candidate is missing its media section.")
+
+    await peer_connection.addIceCandidate(remote_candidate)
+    return {"accepted": True}

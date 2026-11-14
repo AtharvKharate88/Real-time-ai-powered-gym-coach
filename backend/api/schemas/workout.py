@@ -83,3 +83,9 @@ class WebRTCOffer(BaseModel):
 class WebRTCAnswer(BaseModel):
     sdp: str
     type: Literal["answer"]
+
+
+class WebRTCIceCandidate(BaseModel):
+    candidate: str | None = None
+    sdpMid: str | None = None
+    sdpMLineIndex: int | None = None

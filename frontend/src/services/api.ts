@@ -235,6 +235,16 @@ export function submitWebRTCOffer(
   });
 }
 
+export function submitWebRTCIceCandidate(
+  sessionId: string,
+  candidate: RTCIceCandidateInit | null,
+): Promise<{ accepted: boolean }> {
+  return request<{ accepted: boolean }>(`/api/webrtc/candidate?session_id=${sessionId}`, {
+    method: "POST",
+    body: JSON.stringify(candidate ?? { candidate: "" }),
+  });
+}
+
 export function getWebRTCIceServers(): Promise<{ ice_servers: WebRTCIceServer[] }> {
   return request<{ ice_servers: WebRTCIceServer[] }>("/api/webrtc/ice-servers");
 }

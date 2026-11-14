@@ -5,6 +5,7 @@ import {
   getWorkoutMetrics,
   getVoice,
   getWorkoutHistory,
+  submitWebRTCIceCandidate,
   submitWebRTCOffer,
   updateWorkoutStatus,
   type Exercise,
@@ -19,33 +20,6 @@ import WorkoutFlowNav from "./WorkoutFlowNav";
 function readVoicePreference(): boolean {
   try { return window.localStorage.getItem("ai_gym_voice_coaching") !== "false"; }
   catch { return true; }
-}
-
-function waitForIceGatheringComplete(connection: RTCPeerConnection): Promise<void> {
-  if (connection.iceGatheringState === "complete") return Promise.resolve();
-
-  return new Promise((resolve, reject) => {
-    const timeoutId = window.setTimeout(() => {
-      cleanup();
-      reject(new Error("Timed out gathering WebRTC network candidates. Check the TURN server and retry."));
-    }, 60_000);
-
-    const onIceGatheringStateChange = () => {
-      if (connection.iceGatheringState === "complete") {
-        cleanup();
-        resolve();
-      }
-    };
-
-    const cleanup = () => {
-      window.clearTimeout(timeoutId);
-      connection.removeEventListener("icegatheringstatechange", onIceGatheringStateChange);
-    };
-
-    connection.addEventListener("icegatheringstatechange", onIceGatheringStateChange);
-    // Gathering can complete between the initial check and listener registration.
-    onIceGatheringStateChange();
-  });
 }
 
 const exerciseMetrics: Record<Exercise, { label: string; key: string; angle?: boolean }[]> = {
@@ -234,6 +208,23 @@ export default function WorkoutPage({ user, onBack, onDashboard, onHistory, onSi
         iceTransportPolicy: hasTurnServer ? "relay" : "all",
       });
       peerConnection.current = connection;
+      const pendingCandidates: (RTCIceCandidateInit | null)[] = [];
+      let canSendCandidates = false;
+      let candidateSendChain = Promise.resolve();
+      const queueCandidate = (candidate: RTCIceCandidateInit | null) => {
+        if (!canSendCandidates) {
+          pendingCandidates.push(candidate);
+          return;
+        }
+        candidateSendChain = candidateSendChain.then(async () => {
+          await submitWebRTCIceCandidate(session.session_id, candidate);
+        }).catch((candidateError: unknown) => {
+          console.warn("Unable to send a WebRTC ICE candidate.", candidateError);
+        });
+      };
+      connection.onicecandidate = (event) => {
+        queueCandidate(event.candidate?.toJSON() ?? null);
+      };
       setConnectionState("connecting");
       connection.onconnectionstatechange = () => {
         setConnectionState(connection.connectionState);
@@ -253,16 +244,13 @@ export default function WorkoutPage({ user, onBack, onDashboard, onHistory, onSi
 
       const offer = await connection.createOffer();
       await connection.setLocalDescription(offer);
-      // This backend uses non-trickle ICE, so send the completed SDP after
-      // browser candidates (including TURN relays) have been gathered.
-      await waitForIceGatheringComplete(connection);
-      const localOffer = connection.localDescription;
-      if (!localOffer?.sdp) throw new Error("The WebRTC offer is unavailable after ICE gathering.");
-      const answer = await submitWebRTCOffer(session.session_id, {
-        type: localOffer.type,
-        sdp: localOffer.sdp,
-      });
+      if (!offer.sdp) throw new Error("The WebRTC offer is unavailable.");
+      const answer = await submitWebRTCOffer(session.session_id, offer);
       await connection.setRemoteDescription(answer);
+      canSendCandidates = true;
+      for (const candidate of pendingCandidates.splice(0)) {
+        queueCandidate(candidate);
+      }
       await updateWorkoutStatus(session.session_id, "start");
       setSessionId(session.session_id);
       setStatus("running");
