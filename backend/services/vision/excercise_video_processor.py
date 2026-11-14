@@ -1,6 +1,7 @@
 import os
 import platform
 import time
+from fractions import Fraction
 import cv2
 import av
 import numpy as np
@@ -48,14 +49,10 @@ class VideoProcessorClass:
         started = time.perf_counter()
         log("[VIDEO] MediaPipe PoseLandmarker loading on video thread")
         try:
-            model_filename = os.getenv(
-                "MEDIAPIPE_POSE_MODEL",
-                "pose_landmarker_lite.task",
-            ).strip()
             model_path = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
                 "ml_models",
-                model_filename,
+                "pose_landmarker_full.task",
             )
             def create_landmarker(delegate):
                 options = vision.PoseLandmarkerOptions(
@@ -124,8 +121,8 @@ class VideoProcessorClass:
                 self._draw_overlays(image, metrics, exercise_type)
 
         annotated = av.VideoFrame.from_ndarray(image, format="bgr24")
-        annotated.pts = frame.pts
-        annotated.time_base = frame.time_base
+        annotated.pts = frame.pts if frame.pts is not None else int(time.monotonic() * 90_000)
+        annotated.time_base = frame.time_base or Fraction(1, 90_000)
         return annotated
 
     def get_form_score(self) -> int | None:
