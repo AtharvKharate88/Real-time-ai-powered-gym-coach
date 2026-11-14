@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import time
-from fractions import Fraction
 
 from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from fastapi import APIRouter, HTTPException, Request
@@ -46,21 +45,36 @@ class ProcessedVideoTrack(VideoStreamTrack):
         self.processor = processor
         self.session = session
         self._source_frames = asyncio.Queue(maxsize=1)
-        self._frames = asyncio.Queue(maxsize=1)
+        self._video_frames = asyncio.Queue(maxsize=1)
         self._reader = None
         self._processor = None
-        self._timestamp_origin = time.monotonic()
         self._dropped_frames = 0
+        self._output_frames = 0
+        self._output_report_at = time.monotonic()
 
     async def recv(self):
         if self._reader is None:
             self._reader = asyncio.create_task(self._read_frames())
             self._processor = asyncio.create_task(self._process_frames())
-        return await self._frames.get()
+        frame = await self._video_frames.get()
+        annotate = getattr(self.processor, "annotate_latest", None)
+        output = annotate(frame) if callable(annotate) else frame
+        self._output_frames += 1
+        now = time.monotonic()
+        elapsed = now - self._output_report_at
+        if elapsed >= 5:
+            logger.info("[VIDEO] Live output FPS=%.1f", self._output_frames / elapsed)
+            self._output_frames = 0
+            self._output_report_at = now
+        return output
 
     async def _read_frames(self):
         while True:
             frame = await self.source.recv()
+            if self._video_frames.full():
+                self._video_frames.get_nowait()
+                self._dropped_frames += 1
+            await self._video_frames.put(frame)
             if self._source_frames.full():
                 # Replace the queued frame with this newer one; inference must not build a backlog.
                 self._source_frames.get_nowait()
@@ -73,13 +87,7 @@ class ProcessedVideoTrack(VideoStreamTrack):
             if self.session.status == "running":
                 dropped = self._dropped_frames
                 self._dropped_frames = 0
-                frame = await asyncio.to_thread(self.processor.recv, frame, dropped)
-            frame.pts = int((time.monotonic() - self._timestamp_origin) * 90_000)
-            frame.time_base = Fraction(1, 90_000)
-            if self._frames.full():
-                self._frames.get_nowait()
-                self._dropped_frames += 1
-            await self._frames.put(frame)
+                await asyncio.to_thread(self.processor.recv, frame, dropped)
 
     def stop(self) -> None:
         for task in (self._reader, self._processor):

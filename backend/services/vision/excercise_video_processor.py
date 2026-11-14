@@ -19,11 +19,14 @@ from services.vision.form_score import FormScoreAccumulator
 
 
 class VideoProcessorClass:
-    _INFER_MAX_WIDTH = 640
+    # The Render API runs on a small CPU instance. Use a smaller inference
+    # frame and MediaPipe's lite model there to keep the returned video fresh.
+    _INFER_MAX_WIDTH = 320
 
     def __init__(self):
         self._lock = threading.Lock()
         self._latest_metrics = None
+        self._latest_landmarks = None
         self._exercise_type = "Squats"
         self._landmarker = None
         self._landmarker_error = None
@@ -45,10 +48,14 @@ class VideoProcessorClass:
         started = time.perf_counter()
         log("[VIDEO] MediaPipe PoseLandmarker loading on video thread")
         try:
+            model_filename = os.getenv(
+                "MEDIAPIPE_POSE_MODEL",
+                "pose_landmarker_lite.task",
+            ).strip()
             model_path = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
                 "ml_models",
-                "pose_landmarker_full.task",
+                model_filename,
             )
             def create_landmarker(delegate):
                 options = vision.PoseLandmarkerOptions(
@@ -100,6 +107,26 @@ class VideoProcessorClass:
     def get_latest_metrics(self):
         with self._lock:
             return None if self._latest_metrics is None else self._latest_metrics.copy()
+
+    def annotate_latest(self, frame):
+        """Overlay the newest pose result on a fresh frame without waiting for inference."""
+        image = cv2.flip(frame.to_ndarray(format="bgr24"), 1)
+        with self._lock:
+            landmarks = self._latest_landmarks
+            metrics = None if self._latest_metrics is None else self._latest_metrics.copy()
+            exercise_type = self._exercise_type
+
+        if landmarks is None:
+            self._draw_no_pose_warnings(image)
+        else:
+            self._draw_skeleton(image, landmarks)
+            if metrics:
+                self._draw_overlays(image, metrics, exercise_type)
+
+        annotated = av.VideoFrame.from_ndarray(image, format="bgr24")
+        annotated.pts = frame.pts
+        annotated.time_base = frame.time_base
+        return annotated
 
     def get_form_score(self) -> int | None:
         return self._form_score.get_score()
@@ -273,6 +300,8 @@ class VideoProcessorClass:
                 "pose_detected": False,
                 "pose_status": "unavailable" if self._landmarker_error else "loading",
             })
+            with self._lock:
+                self._latest_landmarks = None
         else:
             infer_image = image
             height, width = image.shape[:2]
@@ -294,12 +323,16 @@ class VideoProcessorClass:
                 latest_metrics = self.get_latest_metrics() or {}
                 latest_metrics.update({"pose_detected": False, "pose_status": "error"})
                 self.set_latest_metrics(latest_metrics)
+                with self._lock:
+                    self._latest_landmarks = None
                 recv_ms = (time.perf_counter() - recv_started) * 1000
                 self._stats.record(recv_ms, 0.0, 0.0, dropped)
                 return av.VideoFrame.from_ndarray(image, format="bgr24")
             infer_ms = (time.perf_counter() - infer_started) * 1000
             if result.pose_landmarks:
                 landmarks = result.pose_landmarks[0]
+                with self._lock:
+                    self._latest_landmarks = landmarks
                 self._draw_skeleton(image, landmarks)
                 ex_type = self.get_exercise()
                 detector = self._detectors.get(ex_type)
@@ -313,6 +346,8 @@ class VideoProcessorClass:
                     self._draw_overlays(image, metrics, ex_type)
                     self.set_latest_metrics(metrics)
             else:
+                with self._lock:
+                    self._latest_landmarks = None
                 self._draw_no_pose_warnings(image)
                 latest_metrics = self.get_latest_metrics() or {}
                 latest_metrics["pose_detected"] = False
