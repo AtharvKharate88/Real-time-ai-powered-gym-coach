@@ -28,7 +28,7 @@ function waitForIceGatheringComplete(connection: RTCPeerConnection): Promise<voi
     const timeoutId = window.setTimeout(() => {
       cleanup();
       reject(new Error("Timed out gathering WebRTC network candidates. Check the TURN server and retry."));
-    }, 20_000);
+    }, 60_000);
 
     const onIceGatheringStateChange = () => {
       if (connection.iceGatheringState === "complete") {
