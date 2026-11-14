@@ -136,7 +136,7 @@ export default function WorkoutPage({ user, onBack, onDashboard, onHistory, onSi
     if (!stream || !video) { setStatus("error"); setMessage("Camera stream was lost. Go back and reconnect your camera."); return; }
     video.srcObject = stream;
     void video.play().catch(() => undefined);
-    const worker = new Worker(new URL("../workers/pose.worker.ts", import.meta.url), { type: "module" });
+    const worker = new Worker(new URL("../workers/pose.worker.ts", import.meta.url));
     workerRef.current = worker;
     worker.onmessage = (event: MessageEvent<{ type: string; landmarks?: Landmark[] | null; message?: string }>) => {
       inFlightRef.current = false;
