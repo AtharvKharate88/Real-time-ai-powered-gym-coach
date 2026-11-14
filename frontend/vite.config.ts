@@ -3,6 +3,6 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
-  base: "/Real-time-ai-powered-gym-coach/",
+  base: "/",
   worker: { format: "iife" },
 });
