@@ -61,7 +61,7 @@ export default function LandingPage({ onWorkout, onDashboard, user, authLoading,
               </button>
               <a className="button button-secondary" href="#features">Explore features</a>
             </div>
-            <p className="inline-alert">Pose tracking runs on your device. No account or API key required.</p>
+            <p className="inline-alert">Sign in with Google to save workout history securely to your account.</p>
             <div className="hero-proof"><span className="proof-icon">✓</span><span>Works with your webcam</span><span className="proof-divider" /><span>5 supported exercises</span></div>
           </div>
           <div className="hero-art-wrap">

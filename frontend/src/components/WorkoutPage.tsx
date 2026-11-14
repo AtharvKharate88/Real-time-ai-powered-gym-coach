@@ -1,258 +1,459 @@
 import { useEffect, useRef, useState } from "react";
-import type { AuthUser, Exercise, HistoryEntry } from "../services/api";
-import { saveLocalWorkout } from "../services/api";
+import {
+  createWorkoutSession,
+  getWorkoutMetrics,
+  getVoice,
+  getWorkoutHistory,
+  submitWebRTCOffer,
+  updateWorkoutStatus,
+  type Exercise,
+  type WorkoutSession,
+  type WorkoutMetrics,
+  type HistoryEntry,
+  type AuthUser,
+} from "../services/api";
 import { exerciseOptions } from "./exerciseOptions";
 import WorkoutFlowNav from "./WorkoutFlowNav";
 
-type Landmark = { x: number; y: number; z: number; visibility: number };
-type Metrics = Record<string, number | string | boolean>;
-type RepTracker = { stage: string | null; pending: string | null; pendingFrames: number; armed: boolean; reps: number };
-type Props = { user: AuthUser; onBack: () => void; onDashboard: () => void; onHistory: () => void; onSignOut: () => void; initialExercise?: Exercise; preparedStream?: MediaStream };
+function readVoicePreference(): boolean {
+  try { return window.localStorage.getItem("ai_gym_voice_coaching") !== "false"; }
+  catch { return true; }
+}
 
-const CONNECTIONS = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,31],[28,32]] as const;
-const freshTracker = (): RepTracker => ({ stage: null, pending: null, pendingFrames: 0, armed: false, reps: 0 });
-const point = (landmarks: Landmark[], index: number) => landmarks[index] ?? { x: 0, y: 0, z: 0, visibility: 0 };
-const angle = (a: Landmark, b: Landmark, c: Landmark) => {
-  const ax = a.x - b.x, ay = a.y - b.y, cx = c.x - b.x, cy = c.y - b.y;
-  const denominator = Math.hypot(ax, ay) * Math.hypot(cx, cy);
-  if (!denominator) return 0;
-  return Math.acos(Math.max(-1, Math.min(1, (ax * cx + ay * cy) / denominator))) * 180 / Math.PI;
+const exerciseMetrics: Record<Exercise, { label: string; key: string; angle?: boolean }[]> = {
+  "Squats": [
+    { label: "Knee angle", key: "knee_angle", angle: true },
+    { label: "Depth", key: "depth_status" },
+    { label: "Back angle", key: "back_angle", angle: true },
+  ],
+  "Push-ups": [
+    { label: "Elbow angle", key: "elbow_angle", angle: true },
+    { label: "Alignment", key: "body_alignment" },
+    { label: "Hip position", key: "hip_status" },
+  ],
+  "Biceps Curls (Dumbbell)": [
+    { label: "Elbow angle", key: "elbow_angle", angle: true },
+    { label: "Shoulder", key: "shoulder_status" },
+    { label: "Movement", key: "swing_status" },
+  ],
+  "Shoulder Press": [
+    { label: "Elbow angle", key: "elbow_angle", angle: true },
+    { label: "Extension", key: "extension_status" },
+    { label: "Back", key: "back_arch_status" },
+  ],
+  "Lunges": [
+    { label: "Front knee angle", key: "front_knee_angle", angle: true },
+    { label: "Torso angle", key: "torso_angle", angle: true },
+    { label: "Balance", key: "balance_status" },
+  ],
 };
-const visibility = (landmarks: Landmark[], indices: number[]) => Math.min(...indices.map((index) => point(landmarks, index).visibility));
 
-function analyze(exercise: Exercise, landmarks: Landmark[], tracker: RepTracker): Metrics {
-  let movementAngle = 0, low = 100, high = 160, countStage = "up", lowStage = "down", visible = false;
-  let metrics: Metrics = {};
-  let issue = "";
-  if (exercise === "Squats" || exercise === "Lunges") {
-    const sides = [[23,25,27,11],[24,26,28,12]];
-    const side = sides.sort((a,b) => visibility(landmarks,[b[0],b[1],b[2]]) - visibility(landmarks,[a[0],a[1],a[2]]))[0];
-    const [hip,knee,ankle,shoulder] = side;
-    movementAngle = angle(point(landmarks,hip),point(landmarks,knee),point(landmarks,ankle));
-    visible = visibility(landmarks,[hip,knee,ankle]) > .55;
-    if (exercise === "Squats") {
-      const backAngle = angle(point(landmarks,shoulder),point(landmarks,hip),point(landmarks,knee));
-      metrics = { knee_angle: visible ? Math.round(movementAngle) : "N/A", back_angle: visible ? Math.round(backAngle) : "N/A", depth_status: !visible ? "N/A" : movementAngle <= 100 ? "GOOD DEPTH" : tracker.stage === "up" ? "STANDING" : "TOO HIGH", landmarks_visible: visible };
-      if (visible && movementAngle > 100 && tracker.stage !== "up") issue = "Increase squat depth";
-      if (visible && backAngle < 130) issue = "Keep your torso more upright";
-    } else {
-      const torsoAngle = angle(point(landmarks,shoulder),point(landmarks,hip),point(landmarks,knee));
-      metrics = { front_knee_angle: visible ? Math.round(movementAngle) : "N/A", torso_angle: visible ? Math.round(torsoAngle) : "N/A", balance_status: "BALANCED", landmarks_visible: visible };
-    }
-  } else {
-    const sides = [[11,13,15,23,27],[12,14,16,24,28]];
-    const side = sides.sort((a,b) => visibility(landmarks,b) - visibility(landmarks,a))[0];
-    const [shoulder,elbow,wrist,hip,ankle] = side;
-    movementAngle = angle(point(landmarks,shoulder),point(landmarks,elbow),point(landmarks,wrist));
-    visible = visibility(landmarks,side.slice(0,3)) > .55;
-    if (exercise === "Push-ups") {
-      low = 90;
-      const bodyAngle = angle(point(landmarks,shoulder),point(landmarks,hip),point(landmarks,ankle));
-      const deviation = point(landmarks,hip).y - (point(landmarks,shoulder).y + point(landmarks,ankle).y) / 2;
-      const alignment = bodyAngle > 160 ? "Straight" : bodyAngle > 140 ? "Slight Bend" : "Poor Form";
-      const hipStatus = Math.abs(deviation) <= .08 ? "LEVEL" : deviation > 0 ? "SAGGING" : "PIKED UP";
-      metrics = { elbow_angle: visible ? Math.round(movementAngle) : "N/A", body_alignment: alignment, hip_status: hipStatus, landmarks_visible: visible };
-      if (visible && alignment !== "Straight") issue = "Keep your body in a straight line";
-      if (visible && hipStatus !== "LEVEL") issue = "Keep your hips level";
-    } else if (exercise === "Biceps Curls (Dumbbell)") {
-      low = 50; high = 160; countStage = "down"; lowStage = "up";
-      const drift = Math.abs(point(landmarks,elbow).x - point(landmarks,shoulder).x);
-      const torsoLean = Math.abs((point(landmarks,11).x + point(landmarks,12).x - point(landmarks,23).x - point(landmarks,24).x) / 2);
-      metrics = { elbow_angle: visible ? Math.round(movementAngle) : "N/A", shoulder_status: drift <= .06 ? "STABLE" : "ELBOW DRIFTING", swing_status: torsoLean <= .08 ? "NO SWING" : "SWINGING", landmarks_visible: visible };
-      if (visible && drift > .06) issue = "Keep your elbow close to your side";
-      if (visible && torsoLean > .08) issue = "Avoid swinging your torso";
-    } else {
-      low = 90; high = 160; countStage = "down";
-      const knee = side[4] === 27 ? 25 : 26;
-      const backAngle = angle(point(landmarks,shoulder),point(landmarks,hip),point(landmarks,knee));
-      const backStatus = backAngle >= 160 ? "Neutral" : backAngle >= 140 ? "Slight Arch" : "Excessive Arch";
-      metrics = { elbow_angle: visible ? Math.round(movementAngle) : "N/A", extension_status: !visible ? "N/A" : movementAngle >= 160 ? "FULL EXTENSION" : movementAngle >= 130 ? "NEARLY EXTENDED" : "PRESSING", back_arch_status: backStatus, landmarks_visible: visible };
-      if (visible && backStatus !== "Neutral") issue = "Brace your core and keep your back steady";
-    }
-  }
-
-  if (exercise === "Biceps Curls (Dumbbell)") { /* thresholds set above */ }
-  if (exercise === "Shoulder Press") high = 160;
-  if (visible) {
-    const candidate = movementAngle <= low ? lowStage : movementAngle >= high ? (exercise === "Biceps Curls (Dumbbell)" ? "down" : "up") : null;
-    if (!candidate || candidate === tracker.stage) { tracker.pending = null; tracker.pendingFrames = 0; }
-    else {
-      if (candidate === tracker.pending) tracker.pendingFrames += 1;
-      else { tracker.pending = candidate; tracker.pendingFrames = 1; }
-      if (tracker.pendingFrames >= 2) {
-        if (candidate === countStage) { if (tracker.armed) tracker.reps += 1; tracker.armed = false; }
-        else tracker.armed = true;
-        tracker.stage = candidate; tracker.pending = null; tracker.pendingFrames = 0;
-      }
-    }
-  }
-  const formStatus = !visible ? "waiting" : issue ? "warning" : "good";
-  return { ...metrics, reps: tracker.reps, exercise_stage: tracker.stage ?? "ready", rep_completed: false, pose_detected: visible, pose_status: visible ? "detected" : "not_detected", pose_confidence: Math.round(visibility(landmarks, exercise === "Squats" || exercise === "Lunges" ? [23,25,27] : [11,13,15]) * 100), form_status: formStatus, form_issue: issue, movement_valid: visible };
-}
-
-function drawPose(canvas: HTMLCanvasElement, landmarks: Landmark[] | null) {
-  const context = canvas.getContext("2d");
-  if (!context) return;
-  const { width, height } = canvas;
-  context.clearRect(0, 0, width, height);
-  if (!landmarks) return;
-  context.lineWidth = Math.max(3, width / 180);
-  context.strokeStyle = "#a5f332";
-  context.fillStyle = "#f4f8e9";
-  for (const [from,to] of CONNECTIONS) {
-    const a = point(landmarks,from), b = point(landmarks,to);
-    if (a.visibility < .45 || b.visibility < .45) continue;
-    context.beginPath(); context.moveTo(a.x*width,a.y*height); context.lineTo(b.x*width,b.y*height); context.stroke();
-  }
-  for (const joint of landmarks) if (joint.visibility >= .45) {
-    context.beginPath(); context.arc(joint.x*width,joint.y*height,Math.max(3,width/240),0,Math.PI*2); context.fill();
-  }
-}
-
-export default function WorkoutPage({ user, onBack, onDashboard, onHistory, onSignOut, initialExercise = "Squats", preparedStream }: Props) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const workerRef = useRef<Worker | null>(null);
-  const inFlightRef = useRef(false);
-  const lastTimestampRef = useRef(0);
-  const lastVideoTimeRef = useRef(-1);
-  const frameLoopRef = useRef(0);
-  const trackerRef = useRef(freshTracker());
-  const metricsRef = useRef<Metrics | null>(null);
-  const repsRef = useRef(0);
-  const startedAtRef = useRef(0);
-  const savedRef = useRef(false);
-  const [exercise] = useState<Exercise>(initialExercise);
-  const [status, setStatus] = useState<"loading" | "ready" | "running" | "paused" | "stopped" | "error">("loading");
-  const [message, setMessage] = useState("Loading the on-device movement coach…");
-  const [metrics, setMetrics] = useState<Metrics | null>(null);
+export default function WorkoutPage({ user, onBack, onDashboard, onHistory, onSignOut, initialExercise, preparedStream }: { user: AuthUser; onBack: () => void; onDashboard: () => void; onHistory: () => void; onSignOut: () => void; initialExercise?: Exercise; preparedStream?: MediaStream }) {
+  const [exercise, setExercise] = useState<Exercise>(initialExercise ?? "Squats");
   const [targetSets, setTargetSets] = useState(3);
   const [repsPerSet, setRepsPerSet] = useState(10);
-  const [elapsed, setElapsed] = useState(0);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [metrics, setMetrics] = useState<WorkoutMetrics | null>(null);
+  const [status, setStatus] = useState<WorkoutSession["status"]>("ready");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(readVoicePreference);
+  const [coachText, setCoachText] = useState("Coach is standing by.");
+  const [voiceStatus, setVoiceStatus] = useState<"off" | "idle" | "waiting" | "ready" | "speaking" | "unavailable" | "error" | "paused">("idle");
+  const [connectionState, setConnectionState] = useState<RTCPeerConnectionState | "new">("new");
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const processedVideo = useRef<HTMLVideoElement>(null);
+  const peerConnection = useRef<RTCPeerConnection | null>(null);
+  const mediaStream = useRef<MediaStream | null>(null);
+  const preparedMediaStream = useRef<MediaStream | null>(preparedStream ?? null);
+  const voiceAudio = useRef<HTMLAudioElement | null>(null);
+  const metricsRequestActive = useRef(false);
 
   useEffect(() => {
-    const stream = preparedStream;
-    const video = videoRef.current;
-    if (!stream || !video) { setStatus("error"); setMessage("Camera stream was lost. Go back and reconnect your camera."); return; }
-    video.srcObject = stream;
-    void video.play().catch(() => undefined);
-    const worker = new Worker(new URL("../workers/pose.worker.ts", import.meta.url));
-    workerRef.current = worker;
-    worker.onmessage = (event: MessageEvent<{ type: string; landmarks?: Landmark[] | null; message?: string }>) => {
-      inFlightRef.current = false;
-      if (event.data.type === "ready") { setStatus("ready"); setMessage("Camera is ready. Start when you are."); }
-      else if (event.data.type === "error") { setStatus("error"); setMessage(event.data.message ?? "Movement tracking failed to start."); }
-      else if (event.data.type === "pose") {
-        const landmarks = event.data.landmarks ?? null;
-        const canvas = canvasRef.current;
-        const video = videoRef.current;
-        if (canvas && video && video.videoWidth > 0 && (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight)) {
-          canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-        }
-        if (canvas) drawPose(canvas, landmarks);
-        if (statusRef.current === "running" && landmarks) {
-          const next = analyze(exercise, landmarks, trackerRef.current);
-          metricsRef.current = next; repsRef.current = trackerRef.current.reps;
-          setMetrics(next);
-        } else if (statusRef.current === "running") {
-          const next = { pose_detected: false, pose_status: "not_detected", form_status: "waiting", form_issue: "", reps: trackerRef.current.reps };
-          metricsRef.current = next; setMetrics(next);
-        }
-      }
-    };
-    worker.onerror = () => { inFlightRef.current = false; setStatus("error"); setMessage("The movement model could not start in this browser."); };
-    worker.postMessage({ type: "init" });
-    return () => {
-      cancelAnimationFrame(frameLoopRef.current);
-      worker.postMessage({ type: "dispose" }); workerRef.current = null;
-      inFlightRef.current = false;
-      stream.getTracks().forEach((track) => track.stop());
-    };
-  }, [exercise, preparedStream]);
-
-  const statusRef = useRef(status);
-  useEffect(() => { statusRef.current = status; }, [status]);
+    try { window.localStorage.setItem("ai_gym_voice_coaching", String(voiceEnabled)); }
+    catch { /* Keep coaching available for this session if storage is disabled. */ }
+  }, [voiceEnabled]);
 
   useEffect(() => {
-    if (status !== "running") return;
     let active = true;
-    const video = videoRef.current;
-    const capture = (now: number) => {
-      if (!active) return;
-      if (video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !inFlightRef.current && video.currentTime > 0 && video.currentTime !== lastVideoTimeRef.current && now - lastTimestampRef.current >= 66) {
-        inFlightRef.current = true;
-        const timestamp = Math.max(now, lastTimestampRef.current + 1);
-        lastTimestampRef.current = timestamp;
-        lastVideoTimeRef.current = video.currentTime;
-        try {
-          const frame = new VideoFrame(video, { timestamp: Math.round(timestamp * 1000) });
-          workerRef.current?.postMessage({ type: "frame", frame, timestamp }, [frame]);
-        } catch { inFlightRef.current = false; }
-      }
-      frameLoopRef.current = requestAnimationFrame(capture);
+    getWorkoutHistory()
+      .then((savedHistory) => {
+        if (active) setHistory(savedHistory);
+      })
+      .catch(() => {
+        if (active) setError("Unable to load workout history.");
+      });
+    return () => {
+      active = false;
     };
-    frameLoopRef.current = requestAnimationFrame(capture);
-    return () => { active = false; cancelAnimationFrame(frameLoopRef.current); };
-  }, [status]);
+  }, []);
 
   useEffect(() => {
-    if (status !== "running") return;
-    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000)), 250);
-    return () => window.clearInterval(timer);
-  }, [status]);
+    if (!sessionId || status !== "running") return;
+    const intervalId = window.setInterval(() => {
+      if (metricsRequestActive.current) return;
+      metricsRequestActive.current = true;
+      getWorkoutMetrics(sessionId)
+        .then((nextMetrics) => {
+          setMetrics(nextMetrics);
+          setElapsedSeconds(nextMetrics.elapsed_seconds);
+          if (nextMetrics.workout_completed) {
+            void updateWorkoutStatus(sessionId, "stop").catch(() => undefined);
+            setStatus("stopped");
+            mediaStream.current?.getTracks().forEach((track) => track.stop());
+            void peerConnection.current?.close();
+            peerConnection.current = null;
+            mediaStream.current = null;
+            setConnectionState("closed");
+            getWorkoutHistory().then(setHistory).catch(() => undefined);
+          }
+        })
+        .catch((requestError: unknown) => {
+          setError(
+            requestError instanceof Error
+              ? requestError.message
+              : "Unable to read workout metrics.",
+          );
+        })
+        .finally(() => { metricsRequestActive.current = false; });
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [sessionId, status]);
 
-  function start() {
-    trackerRef.current = freshTracker(); metricsRef.current = null; repsRef.current = 0; lastTimestampRef.current = 0;
-    startedAtRef.current = Date.now() - elapsed * 1000; savedRef.current = false;
-    setMetrics(null); setStatus("running"); setMessage("Move into view. Your camera preview stays live while tracking runs in the background.");
+  useEffect(() => {
+    if (!voiceEnabled) {
+      setVoiceStatus("off");
+      return;
+    }
+    if (!sessionId || status !== "running") {
+      setVoiceStatus(status === "paused" ? "paused" : "idle");
+      return;
+    }
+    setVoiceStatus("waiting");
+    const intervalId = window.setInterval(() => {
+      getVoice(sessionId)
+        .then((voice) => {
+          if (!voice) return;
+          if (!voice.available) {
+            setVoiceStatus("unavailable");
+            return;
+          }
+          if (voice.error) {
+            setVoiceStatus("error");
+            return;
+          }
+          if (voice.text) setCoachText(voice.text);
+          if (voice.audio_base64) {
+            voiceAudio.current?.pause();
+            const audio = new Audio(`data:audio/mp3;base64,${voice.audio_base64}`);
+            voiceAudio.current = audio;
+            audio.onended = () => setVoiceStatus("ready");
+            audio.play()
+              .then(() => setVoiceStatus("speaking"))
+              .catch(() => setVoiceStatus("error"));
+          } else if (voice.text) {
+            setVoiceStatus("ready");
+          }
+        })
+        .catch(() => setVoiceStatus("unavailable"));
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [sessionId, status, voiceEnabled]);
+
+  useEffect(
+    () => () => {
+      mediaStream.current?.getTracks().forEach((track) => track.stop());
+      void peerConnection.current?.close();
+      voiceAudio.current?.pause();
+    },
+    [],
+  );
+
+  async function startWorkout() {
+    setError(null);
+    setBusy(true);
+    let createdSessionId: string | null = null;
+    try {
+      const stream = preparedMediaStream.current ?? await (async () => {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error("This browser does not support webcam access.");
+        }
+        return navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480, frameRate: { ideal: 15, max: 24 } },
+          audio: false,
+        });
+      })();
+      preparedMediaStream.current = null;
+      mediaStream.current = stream;
+      const session = await createWorkoutSession(
+        exercise,
+        targetSets,
+        repsPerSet,
+      );
+      createdSessionId = session.session_id;
+
+      const connection = new RTCPeerConnection();
+      peerConnection.current = connection;
+      setConnectionState("connecting");
+      connection.onconnectionstatechange = () => {
+        setConnectionState(connection.connectionState);
+        if (connection.connectionState === "failed" || connection.connectionState === "disconnected") {
+          setError("WebRTC connection lost. Stop and restart the workout.");
+        }
+      };
+      connection.addTransceiver("video", { direction: "sendrecv" });
+      const sender = connection.getSenders()[0];
+      await sender.replaceTrack(stream.getVideoTracks()[0]);
+      connection.ontrack = (event) => {
+        if (processedVideo.current) {
+          processedVideo.current.srcObject = event.streams[0];
+          void processedVideo.current.play().catch(() => undefined);
+        }
+      };
+
+      const offer = await connection.createOffer();
+      await connection.setLocalDescription(offer);
+      const answer = await submitWebRTCOffer(session.session_id, offer);
+      await connection.setRemoteDescription(answer);
+      await updateWorkoutStatus(session.session_id, "start");
+      setSessionId(session.session_id);
+      setStatus("running");
+      setMetrics(null);
+      setElapsedSeconds(0);
+    } catch (requestError: unknown) {
+      if (createdSessionId) {
+        void updateWorkoutStatus(createdSessionId, "stop").catch(() => undefined);
+      }
+      mediaStream.current?.getTracks().forEach((track) => track.stop());
+      mediaStream.current = null;
+      void peerConnection.current?.close();
+      peerConnection.current = null;
+      setConnectionState("closed");
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Unable to start the workout.",
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function finish(destination: "dashboard" | "history" | "back" | "signout") {
-    setStatus("stopped");
-    const totalReps = repsRef.current;
-    if (totalReps > 0 && !savedRef.current) {
-      const entry: HistoryEntry = { exercise_name: exercise, reps: totalReps, sets: Math.min(targetSets, Math.floor(totalReps / repsPerSet)), time: elapsed, form_score: null, set_breakdown: Array.from({ length: Math.ceil(totalReps / repsPerSet) }, (_, index) => Math.min(repsPerSet, totalReps - index * repsPerSet)), created_at: new Date().toISOString() };
-      saveLocalWorkout(entry); savedRef.current = true;
+  async function exitWorkout(destination: "exercise" | "dashboard" | "signout" = "exercise") {
+    if (sessionId && (status === "running" || status === "paused")) {
+      const prompt = destination === "signout"
+        ? "Finish and save this workout before signing out?"
+        : `Finish this workout and return to your ${destination === "dashboard" ? "dashboard" : "exercise selection"}?`;
+      if (!window.confirm(prompt)) return;
+      setBusy(true);
+      try {
+        await updateWorkoutStatus(sessionId, "stop");
+        setStatus("stopped");
+        mediaStream.current?.getTracks().forEach((track) => track.stop());
+        mediaStream.current = null;
+        await peerConnection.current?.close();
+        peerConnection.current = null;
+        setConnectionState("closed");
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : "Unable to finish the workout.");
+        return;
+      } finally {
+        setBusy(false);
+      }
     }
     if (destination === "dashboard") onDashboard();
-    else if (destination === "history") onHistory();
-    else if (destination === "back") onBack();
-    else onSignOut();
+    else if (destination === "signout") onSignOut();
+    else onBack();
   }
 
-  const reps = Number(metrics?.reps ?? 0);
-  const setsDone = Math.min(targetSets, Math.floor(reps / repsPerSet));
-  const feedback = typeof metrics?.form_issue === "string" && metrics.form_issue ? metrics.form_issue : metrics?.pose_detected === true ? "Your movement looks good. Keep a steady pace." : "Move back until your full body is in the camera view.";
-  const time = `${String(Math.floor(elapsed / 60)).padStart(2,"0")}:${String(elapsed % 60).padStart(2,"0")}`;
+  async function changeStatus(action: "pause" | "stop") {
+    if (!sessionId) return;
+    setBusy(true);
+    try {
+      const result = await updateWorkoutStatus(sessionId, action);
+      setStatus(result.status);
+      if (action === "stop") {
+        mediaStream.current?.getTracks().forEach((track) => track.stop());
+        mediaStream.current = null;
+        await peerConnection.current?.close();
+        peerConnection.current = null;
+        setConnectionState("closed");
+        const finalMetrics = await getWorkoutMetrics(sessionId);
+        setMetrics(finalMetrics);
+        setElapsedSeconds(finalMetrics.elapsed_seconds);
+        setHistory(await getWorkoutHistory());
+      }
+    } catch (requestError: unknown) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Unable to update workout state.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
 
-  return <main className="workout-page">
-    <WorkoutFlowNav user={user} step={3} onDashboard={() => finish("dashboard")} onSignOut={() => finish("signout")} />
-    <button className="btn-ghost workout-back" disabled={status === "running"} onClick={() => finish("back")}>← BACK TO EXERCISE SELECTION</button>
-    <div className="section-header"><span className="section-tag">ON DEVICE · PRIVATE MOVEMENT TRACKING</span><h1>Let’s <em>move.</em></h1><p className="workout-intro">Your camera stays on this device. The coach tracks your movement without sending video to a server.</p></div>
-    <section className="workout-panel">
-      <div className="workout-controls"><label>Exercise<input value={exercise} readOnly /></label><label>Sets to complete<input type="number" min="1" max="50" disabled={status === "running"} value={targetSets} onChange={(event) => setTargetSets(Math.max(1, Math.min(50, Number(event.target.value) || 1)))} /></label><label>Reps in each set<input type="number" min="1" max="50" disabled={status === "running"} value={repsPerSet} onChange={(event) => setRepsPerSet(Math.max(1, Math.min(50, Number(event.target.value) || 1)))} /></label>
-        {status === "ready" || status === "stopped" ? <button className="btn-primary" onClick={start}>Start workout</button> : null}
-        {status === "loading" ? <button className="btn-primary" disabled>Loading movement coach…</button> : null}
-        {status === "running" ? <button className="btn-ghost" onClick={() => setStatus("paused")}>Pause</button> : null}
-        {status === "paused" ? <button className="btn-primary" onClick={() => setStatus("running")}>Resume</button> : null}
-        {(status === "running" || status === "paused") ? <button className="btn-ghost" onClick={() => finish("dashboard")}>Finish workout</button> : null}
+  function resumeWorkout() {
+    if (sessionId) {
+      void updateWorkoutStatus(sessionId, "start")
+        .then(() => setStatus("running"))
+        .catch(() => setError("Unable to resume the workout."));
+    }
+
+  }
+
+  const formatTime = (seconds: number) =>
+    `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${(seconds % 60)
+      .toString()
+      .padStart(2, "0")}`;
+
+  const metricValue = (key: string) => metrics?.metrics[key] ?? "N/A";
+  const poseDetected = metrics?.metrics.pose_detected === true;
+  const landmarksVisible = metrics?.metrics.landmarks_visible;
+  const formStatus = typeof metrics?.metrics.form_status === "string" ? metrics.metrics.form_status : "waiting";
+  const formIssue = typeof metrics?.metrics.form_issue === "string" ? metrics.metrics.form_issue : "";
+  const poseSignal = metrics?.metrics.pose_status;
+  const poseStatus = !sessionId
+    ? "Ready when you are"
+    : poseDetected && landmarksVisible === false
+      ? "I can see you. Move back so your full body is visible."
+      : poseDetected
+      ? "You’re in view"
+      : poseSignal === "loading"
+        ? "Getting the coach ready"
+        : poseSignal === "unavailable"
+          ? "Movement tracking is unavailable. Try again in a moment."
+          : poseSignal === "error"
+            ? "Movement tracking stopped because of an error."
+      : metrics
+        ? "I can’t see you yet. Move into the camera frame."
+        : "Finding your position…";
+  const connectionLabel = connectionState === "connected"
+    ? "Connected"
+    : connectionState === "connecting" || connectionState === "new"
+      ? "Connecting"
+      : connectionState === "disconnected"
+        ? "Disconnected"
+        : connectionState === "failed"
+          ? "Connection failed"
+          : connectionState === "closed"
+            ? "Closed"
+            : connectionState;
+  const voiceStatusLabel: Record<typeof voiceStatus, string> = {
+    off: "Off",
+    idle: "Waiting to start",
+    waiting: "Waiting for a cue",
+    ready: "Cue ready",
+    speaking: "Speaking",
+    unavailable: "Voice tips unavailable",
+    error: "Couldn’t play the last voice tip",
+    paused: "Paused",
+  };
+  const progressPercent = Math.min(100, ((metrics?.current_set_reps ?? 0) / repsPerSet) * 100);
+  const configurationLocked = Boolean(sessionId && status !== "stopped");
+  const displayedFeedback = !sessionId
+    ? "Start your workout and I’ll follow your movement."
+    : !poseDetected
+      ? "Move into the camera frame so I can see you."
+      : landmarksVisible === false
+        ? `I can see you, but not your full movement. ${exerciseOptions.find((option) => option.name === exercise)?.camera ?? "Adjust your camera view."}`
+      : formIssue
+        ? formIssue
+      : voiceStatus === "off"
+        ? "You’re in view. Spoken tips are turned off."
+        : voiceStatus === "unavailable"
+          ? "You’re in view. Spoken tips aren’t available right now."
+          : voiceStatus === "error"
+            ? "You’re in view, but the last spoken tip couldn’t play."
+            : voiceStatus === "waiting"
+              ? "You’re in view. I’ll speak up when I have a tip."
+              : voiceStatus === "paused"
+                ? "Workout paused. Resume when you are ready."
+            : coachText;
+
+  return (
+    <main className="workout-page">
+      <WorkoutFlowNav user={user} step={3} onDashboard={() => void exitWorkout("dashboard")} onSignOut={() => void exitWorkout("signout")} />
+      <button className="btn-ghost workout-back" disabled={busy} onClick={() => void exitWorkout()}>
+        ← BACK TO EXERCISE SELECTION
+      </button>
+      <div className="section-header">
+        <span className="section-tag">YOUR SESSION</span>
+        <h1 className="section-title">Let’s <em>move.</em></h1>
+        <p className="workout-intro">The coach follows your movement and counts each rep. Keep your full body in view.</p>
       </div>
-      <div className="workout-live-layout">
-        <div className="workout-video-grid"><div className="workout-video-panel" style={{ position: "relative" }}>
-          <div className="workout-feed-heading"><span className="section-tag">LIVE CAMERA</span><span className={`workout-connection connection-${status === "running" || status === "paused" ? "connected" : status}`}>{status === "running" ? "Tracking" : status === "paused" ? "Paused" : status === "ready" ? "Ready" : status === "loading" ? "Loading" : status === "error" ? "Unavailable" : "Stopped"}</span></div>
-          <video ref={videoRef} autoPlay muted playsInline aria-label="Live camera preview" />
-          <canvas ref={canvasRef} aria-hidden="true" style={{ position: "absolute", inset: "48px 0 0", width: "100%", height: "calc(100% - 48px)", pointerEvents: "none" }} />
-          {(status === "loading" || status === "error") ? <div className="workout-feed-message" role={status === "error" ? "alert" : "status"}>{message}</div> : null}
-        </div></div>
-        <aside className="workout-live-sidebar"><div className="workout-pose-status"><span className={`pose-indicator${metrics?.pose_detected ? " is-detected" : ""}`} /><div><span className="section-tag">COACH STATUS</span><strong>{status === "paused" ? "Workout paused" : metrics?.pose_detected ? "Following your movement" : status === "running" ? "Finding your position…" : message}</strong></div></div>
-          <div className="workout-kpis"><div><span>TIME</span><strong>{time}</strong></div><div><span>TOTAL REPS</span><strong>{reps}</strong></div><div><span>SETS</span><strong>{setsDone}<small> / {targetSets}</small></strong></div><div><span>REPS THIS SET</span><strong>{reps % repsPerSet}<small> / {repsPerSet}</small></strong></div></div>
-          <div className="set-progress"><div><span>THIS SET</span><span>{Math.round(((reps % repsPerSet) / repsPerSet) * 100)}%</span></div><div className="set-progress-track"><span style={{ width: `${((reps % repsPerSet) / repsPerSet) * 100}%` }} /></div></div>
-        </aside>
-      </div>
-      <div className="workout-feedback"><span className="section-tag">MOVEMENT TIP</span><p role="status">{status === "error" ? message : feedback}</p>
-        {exerciseOptions.find((item) => item.name === exercise)?.instructions.map((tip) => <small key={tip}>{tip}</small>)}
-      </div>
-      {status === "stopped" ? <div className="summary-actions"><button className="button button-primary" onClick={() => finish("history")}>View workout history</button><button className="button button-secondary" onClick={() => finish("back")}>Start another workout</button></div> : null}
-    </section>
-  </main>;
+      <section className="workout-panel">
+        <div className="workout-controls">
+          <label>
+            Exercise
+            <select disabled={configurationLocked || Boolean(initialExercise)} value={exercise} onChange={(event) => setExercise(event.target.value as Exercise)}>
+              {exerciseOptions.map(({ name }) => <option key={name}>{name}</option>)}
+            </select>
+          </label>
+          <label>
+            Sets to complete
+            <input disabled={configurationLocked} type="number" min="1" max="50" value={targetSets} onChange={(event) => setTargetSets(Number(event.target.value))} />
+          </label>
+          <label>
+            Reps in each set
+            <input disabled={configurationLocked} type="number" min="1" max="50" value={repsPerSet} onChange={(event) => setRepsPerSet(Number(event.target.value))} />
+          </label>
+          <label className="voice-toggle"><input type="checkbox" checked={voiceEnabled} onChange={(event) => setVoiceEnabled(event.target.checked)} /> Spoken tips</label>
+          {!sessionId || status === "stopped" ? <button className="btn-primary" disabled={busy} onClick={() => void startWorkout()}>Start workout</button> : null}
+          {status === "running" ? <button className="btn-ghost" disabled={busy} onClick={() => void changeStatus("pause")}>Pause</button> : null}
+          {status === "paused" ? <button className="btn-primary" disabled={busy} onClick={resumeWorkout}>Resume</button> : null}
+          {sessionId && status !== "stopped" ? <button className="btn-ghost" disabled={busy} onClick={() => void changeStatus("stop")}>Finish workout</button> : null}
+        </div>
+        <div className="workout-live-layout">
+          <div className="workout-video-grid">
+            <div className="workout-video-panel">
+              <div className="workout-feed-heading"><span className="section-tag">LIVE COACH VIEW</span><span className={`workout-connection connection-${connectionState}`}>{connectionLabel}</span></div>
+              <video ref={processedVideo} autoPlay playsInline aria-label="Processed workout video with pose overlay" />
+              {connectionState !== "connected" ? <div className="workout-feed-message" role="status">{sessionId ? `Camera ${connectionLabel.toLowerCase()}.` : "Your live camera view will appear here when you start."}</div> : null}
+            </div>
+          </div>
+          <aside className="workout-live-sidebar">
+            <div className="workout-pose-status"><span className={`pose-indicator${poseDetected ? " is-detected" : ""}`} />
+              <div><span className="section-tag">COACH STATUS</span><strong>{poseStatus}</strong></div>
+            </div>
+            <div className="workout-kpis">
+              <div><span>TIME</span><strong>{formatTime(elapsedSeconds)}</strong></div>
+              <div><span>TOTAL REPS</span><strong>{metrics?.reps ?? 0}</strong></div>
+              <div><span>SETS</span><strong>{metrics?.sets_completed ?? 0}<small> / {targetSets}</small></strong></div>
+              <div><span>REPS THIS SET</span><strong>{metrics?.current_set_reps ?? 0}<small> / {repsPerSet}</small></strong></div>
+              <div><span>FORM SCORE</span><strong>{metrics?.form_score == null ? "—" : metrics.form_score}<small>{metrics?.form_score == null ? " waiting" : " / 100"}</small></strong></div>
+            </div>
+            <div className="set-progress" aria-label={`${metrics?.current_set_reps ?? 0} of ${repsPerSet} reps in current set`}>
+              <div><span>THIS SET</span><span>{Math.round(progressPercent)}%</span></div>
+              <div className="set-progress-track"><span style={{ width: `${progressPercent}%` }} /></div>
+            </div>
+            <div className="workout-system-status">
+              <div><span>CAMERA</span><strong>{connectionLabel}</strong></div>
+              <div><span>BODY TRACKING</span><strong>{landmarksVisible === false ? "Move back a little" : poseDetected ? "Following you" : sessionId ? "Looking for you" : "Ready to start"}</strong></div>
+              <div><span>SPOKEN TIPS</span><strong>{voiceStatusLabel[voiceStatus]}</strong></div>
+            </div>
+          </aside>
+        </div>
+        <div className="workout-feedback">
+          <div className="feedback-heading"><span className="section-tag">MOVEMENT TIPS</span>
+            {sessionId ? <span className={`feedback-state feedback-${formStatus}`}>{formStatus === "good" ? "Looking good" : formStatus === "waiting" ? "Waiting for a clear view" : formStatus === "incorrect" ? "Adjust your form" : "Small adjustment"}</span> : null}
+          </div>
+          <p role="status">{displayedFeedback}</p>
+          <div className="feedback-meta"><span>VIEW QUALITY <strong>{typeof metrics?.metrics.pose_confidence === "number" ? `${metrics.metrics.pose_confidence}%` : "—"}</strong></span><span>MOVEMENT <strong>{typeof metrics?.metrics.exercise_stage === "string" ? metrics.metrics.exercise_stage : "—"}</strong></span></div>
+          <div className="workout-detail-grid" aria-label={`${exercise} movement measurements`}>
+            {exerciseMetrics[exercise].map((item) => {
+              const value = poseDetected ? metricValue(item.key) : "—";
+              return <div className="workout-detail-item" key={item.key}><span>{item.label}</span><strong>{value === "N/A" ? "—" : `${value}${item.angle && value !== "—" ? "°" : ""}`}</strong></div>;
+            })}
+          </div>
+          <details className="form-score-method"><summary>How the form score works</summary><p>The score is based on the movement the camera can see. It appears after enough clear movement has been recorded and may be missing if your body is out of view. Use it as a coaching guide, not medical advice.</p></details>
+        </div>
+        {status === "stopped" && sessionId ? <section className="workout-summary" aria-live="polite"><span className="section-tag">SESSION SUMMARY</span><h2>{metrics?.workout_completed ? "Workout complete" : "Workout ended"}</h2><p>{metrics?.reps ? "Your workout was saved to your history." : "No reps were counted this time."}</p><div><span>{exercise}</span><span>{metrics?.reps ?? 0} reps</span><span>{metrics?.sets_completed ?? 0} sets</span><span>{formatTime(elapsedSeconds)}</span><span>{metrics?.form_score == null ? "No form score this time (not enough movement data)." : `Form score: ${metrics.form_score}/100`}</span></div><small>Form scores are estimates, not medical advice.</small><div className="summary-actions"><button className="button button-primary" type="button" onClick={onHistory}>View workout history</button><button className="button button-secondary" type="button" onClick={onDashboard}>Return to dashboard</button><button className="button button-secondary" type="button" onClick={onBack}>Start another workout</button></div></section> : null}
+        {history.length > 0 ? <div className="workout-history"><span className="section-tag">// HISTORY</span>{history.slice(0, 5).map((entry) => <div key={`${entry.exercise_name}-${entry.created_at}`}>{entry.exercise_name}: {entry.reps} reps / {entry.sets} sets</div>)}</div> : null}
+        {error ? <p className="workout-error" role="alert">{error}</p> : null}
+      </section>
+    </main>
+  );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { AuthUser, Exercise, HistoryEntry } from "../services/api";
-import { addLocalManualWorkout, readLocalWorkoutHistory } from "../services/api";
+import { addManualWorkout, getWorkoutHistory, readLocalWorkoutHistory } from "../services/api";
 
 type DashboardSection = "dashboard" | "history" | "profile" | "settings";
 const exerciseNames: Exercise[] = ["Squats", "Push-ups", "Biceps Curls (Dumbbell)", "Shoulder Press", "Lunges"];
@@ -35,7 +35,7 @@ export default function DashboardPage({ user, onWorkout, onSignOut }: { user: Au
 
   useEffect(() => {
     let active = true;
-    if (active) { setHistory(readLocalWorkoutHistory()); setLoading(false); }
+    getWorkoutHistory().then((saved) => { if (active) setHistory(saved); }).catch(() => { if (active) { setHistory(readLocalWorkoutHistory()); setError(true); } }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, []);
 
@@ -85,7 +85,7 @@ export default function DashboardPage({ user, onWorkout, onSignOut }: { user: Au
     setManualSaving(true);
     setManualError("");
     try {
-      const saved = addLocalManualWorkout({
+      const saved = await addManualWorkout({
         exercise_name: String(form.get("exercise")) as Exercise,
         reps: Number(form.get("reps")),
         sets: Number(form.get("sets")),

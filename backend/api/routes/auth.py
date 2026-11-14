@@ -29,7 +29,8 @@ async def google_callback(code: str, state: str) -> RedirectResponse:
     tokens = await exchange_code(code)
     claims = await verify_id_token(tokens.get("id_token", ""))
     user = upsert_google_user(claims)
-    response = RedirectResponse(settings.frontend_origin + "/?view=dashboard")
+    frontend_url = (settings.frontend_redirect_url or settings.frontend_origin).rstrip("/")
+    response = RedirectResponse(frontend_url + "/?view=dashboard")
     response.set_cookie(
         settings.auth_cookie_name,
         create_session_token(user),

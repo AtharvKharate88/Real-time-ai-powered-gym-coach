@@ -40,6 +40,7 @@ class ProcessedVideoTrack(VideoStreamTrack):
         while True:
             frame = await self.source.recv()
             if self._source_frames.full():
+                # Replace the queued frame with this newer one; inference must not build a backlog.
                 self._source_frames.get_nowait()
                 self._dropped_frames += 1
             await self._source_frames.put(frame)

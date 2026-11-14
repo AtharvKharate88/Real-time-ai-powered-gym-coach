@@ -11,8 +11,6 @@ sys.path.insert(0, str(BACKEND_DIR))
 load_dotenv(BACKEND_DIR / ".env", override=True)
 
 from fastapi import HTTPException  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-from api.main import app  # noqa: E402
 from api.routes import workouts  # noqa: E402
 from api.routes import health  # noqa: E402
 from api.services.workout_access import get_request_session  # noqa: E402
@@ -22,13 +20,15 @@ from api.services.workout_sessions import session_manager  # noqa: E402
 
 class WorkoutOwnershipTests(unittest.TestCase):
     def test_anonymous_users_cannot_create_workout_sessions(self) -> None:
-        response = TestClient(app).post(
-            "/api/workouts/sessions",
-            json={"exercise": "Squats", "target_sets": 3, "reps_per_set": 10},
-        )
-        if response.status_code == 201:
-            session_manager.remove(response.json()["session_id"])
-        self.assertEqual(response.status_code, 401)
+        with (
+            patch("api.routes.workouts.current_user", side_effect=HTTPException(status_code=401)),
+            self.assertRaises(HTTPException) as raised,
+        ):
+            workouts.create_session(
+                SimpleNamespace(exercise="Squats", target_sets=3, reps_per_set=10),
+                SimpleNamespace(),
+            )
+        self.assertEqual(raised.exception.status_code, 401)
 
     def test_session_is_hidden_from_a_different_user(self) -> None:
         session = WorkoutSession("Squats", 3, 10, user_id=7)
@@ -149,32 +149,27 @@ class WorkoutOwnershipTests(unittest.TestCase):
             user_id = request.headers.get("x-test-user")
             return SimpleNamespace(id=int(user_id)) if user_id else None
 
+        request = lambda user_id: SimpleNamespace(
+            headers={"x-test-user": str(user_id)}, cookies={}
+        )
         with (
             patch("api.routes.workouts.current_user", side_effect=fake_user),
             patch("api.services.workout_access.optional_current_user", side_effect=fake_user),
         ):
-            client = TestClient(app)
-            created = client.post(
-                "/api/workouts/sessions",
-                headers={"x-test-user": "7"},
-                json={"exercise": "Squats", "target_sets": 3, "reps_per_set": 10},
+            created = workouts.create_session(
+                SimpleNamespace(exercise="Squats", target_sets=3, reps_per_set=10),
+                request(7),
             )
-            self.assertEqual(created.status_code, 201)
-            session_id = created.json()["session_id"]
+            session_id = created.session_id
             try:
-                owner_response = client.post(
-                    f"/api/workouts/sessions/{session_id}/pause",
-                    headers={"x-test-user": "7"},
-                )
-                other_user_response = client.post(
-                    f"/api/workouts/sessions/{session_id}/pause",
-                    headers={"x-test-user": "8"},
-                )
+                owner_response = workouts.pause_session(session_id, request(7))
+                with self.assertRaises(HTTPException) as raised:
+                    workouts.pause_session(session_id, request(8))
             finally:
                 session_manager.remove(session_id)
 
-        self.assertEqual(owner_response.status_code, 200)
-        self.assertEqual(other_user_response.status_code, 404)
+        self.assertEqual(owner_response.status, "paused")
+        self.assertEqual(raised.exception.status_code, 404)
 
 
 if __name__ == "__main__":

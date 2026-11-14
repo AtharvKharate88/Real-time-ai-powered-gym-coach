@@ -1,7 +1,11 @@
 import queue
+import os
 import threading
 import time
 from services.diagnostics import log
+
+_GROQ_RATE_LIMIT_LOCK = threading.Lock()
+_GROQ_NEXT_REQUEST_AT = 0.0
 
 
 class VoicePipeline:
@@ -15,6 +19,14 @@ class VoicePipeline:
         self._pending_events = set()
         self._last_submitted = {}
         self._last_feedback_at = 0.0
+        try:
+            configured_interval = float(
+                os.getenv("GROQ_MIN_REQUEST_INTERVAL_SECONDS", "8")
+            )
+        except ValueError:
+            configured_interval = 8.0
+            log("[VOICE] Invalid GROQ_MIN_REQUEST_INTERVAL_SECONDS; using 8 seconds")
+        self._min_groq_interval_seconds = max(0.0, configured_interval)
         self._last_error = None
         self._worker = threading.Thread(
             target=self._run_worker,
@@ -124,6 +136,17 @@ class VoicePipeline:
                 return False
         return True
 
+    def _wait_for_groq_rate_limit(self):
+        global _GROQ_NEXT_REQUEST_AT
+        with _GROQ_RATE_LIMIT_LOCK:
+            now = time.monotonic()
+            scheduled_at = max(now, _GROQ_NEXT_REQUEST_AT)
+            _GROQ_NEXT_REQUEST_AT = scheduled_at + self._min_groq_interval_seconds
+        delay = scheduled_at - now
+        if delay and self._stop_event.wait(delay):
+            return False
+        return not self._stop_event.is_set()
+
     def _run_worker(self):
         while not self._stop_event.is_set():
             try:
@@ -134,6 +157,8 @@ class VoicePipeline:
                 break
             event, exercise, issue, event_key = task
             try:
+                if not self._wait_for_groq_rate_limit():
+                    continue
                 log("[VOICE] Groq request started")
                 groq_started = time.perf_counter()
                 text = self.llm.give_feedback(event, issue)

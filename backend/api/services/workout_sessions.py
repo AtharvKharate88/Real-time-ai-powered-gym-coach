@@ -115,7 +115,18 @@ class WorkoutSession:
 class WorkoutSessionManager:
     def __init__(self) -> None:
         self._sessions: dict[str, WorkoutSession] = {}
+        self._prepared_processor: Any | None = None
         self._lock = threading.Lock()
+
+    def prepare_processor(self, exercise: str) -> bool:
+        """Load and warm pose inference while the user checks their camera."""
+        with self._lock:
+            if self._prepared_processor is None:
+                from services.vision.excercise_video_processor import VideoProcessorClass
+
+                self._prepared_processor = VideoProcessorClass()
+            self._prepared_processor.set_exercise(exercise)
+            return self._prepared_processor.warm_up()
 
     def create(
         self,
@@ -127,6 +138,10 @@ class WorkoutSessionManager:
         session_id = str(uuid.uuid4())
         session = WorkoutSession(exercise, target_sets, reps_per_set, user_id)
         with self._lock:
+            if self._prepared_processor is not None:
+                session.processor = self._prepared_processor
+                session.processor.set_exercise(exercise)
+                self._prepared_processor = None
             self._sessions[session_id] = session
         return session_id, session
 

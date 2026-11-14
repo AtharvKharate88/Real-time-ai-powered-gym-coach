@@ -1,4 +1,5 @@
 import os
+import platform
 import time
 import cv2
 import av
@@ -18,7 +19,7 @@ from services.vision.form_score import FormScoreAccumulator
 
 
 class VideoProcessorClass:
-    _INFER_MAX_WIDTH = 320
+    _INFER_MAX_WIDTH = 640
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -49,15 +50,36 @@ class VideoProcessorClass:
                 "ml_models",
                 "pose_landmarker_full.task",
             )
-            options = vision.PoseLandmarkerOptions(
-                base_options=python.BaseOptions(model_asset_path=model_path),
-                running_mode=vision.RunningMode.VIDEO,
-                min_pose_detection_confidence=0.7,
-                min_pose_presence_confidence=0.7,
-                min_tracking_confidence=0.7,
-                output_segmentation_masks=False,
-            )
-            self._landmarker = vision.PoseLandmarker.create_from_options(options)
+            def create_landmarker(delegate):
+                options = vision.PoseLandmarkerOptions(
+                    base_options=python.BaseOptions(
+                        model_asset_path=model_path,
+                        delegate=delegate,
+                    ),
+                    running_mode=vision.RunningMode.VIDEO,
+                    min_pose_detection_confidence=0.7,
+                    min_pose_presence_confidence=0.7,
+                    min_tracking_confidence=0.7,
+                    output_segmentation_masks=False,
+                )
+                return vision.PoseLandmarker.create_from_options(options)
+
+            use_gpu = os.getenv("MEDIAPIPE_USE_GPU", "false").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+            }
+            if use_gpu and platform.system() == "Linux":
+                try:
+                    self._landmarker = create_landmarker(python.BaseOptions.Delegate.GPU)
+                    log("[VIDEO] MediaPipe GPU delegate enabled")
+                except Exception as error:
+                    log(f"[VIDEO] GPU delegate unavailable; falling back to CPU: {error}")
+            elif use_gpu:
+                log("[VIDEO] GPU delegate is supported only on Linux in this setup; using CPU")
+
+            if self._landmarker is None:
+                self._landmarker = create_landmarker(python.BaseOptions.Delegate.CPU)
             log(
                 f"[VIDEO] MediaPipe PoseLandmarker ready in "
                 f"{(time.perf_counter() - started) * 1000:.0f}ms"

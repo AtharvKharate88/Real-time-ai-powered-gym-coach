@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AuthUser, Exercise } from "../services/api";
+import { prepareWorkoutVision, type AuthUser, type Exercise } from "../services/api";
 import WorkoutFlowNav from "./WorkoutFlowNav";
 
 interface CameraSetupPageProps {
@@ -78,6 +78,7 @@ export default function CameraSetupPage({ user, cameraGuidance, exercise, onCont
   }, []);
 
   useEffect(() => {
+    void prepareWorkoutVision(exercise).catch(() => undefined);
     void connectCamera();
     return () => {
       if (!transferredRef.current) streamRef.current?.getTracks().forEach((track) => track.stop());

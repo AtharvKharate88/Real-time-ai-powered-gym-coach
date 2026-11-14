@@ -2,11 +2,12 @@
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 
 @dataclass(frozen=True)
@@ -14,6 +15,7 @@ class Settings:
     """Application settings loaded from environment variables."""
 
     frontend_origin: str = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
+    frontend_redirect_url: str = os.getenv("FRONTEND_REDIRECT_URL", "")
     environment: str = os.getenv("ENVIRONMENT", "development")
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
@@ -33,9 +35,17 @@ class Settings:
             return
 
         frontend = urlsplit(self.frontend_origin)
+        frontend_redirect = urlsplit(self.frontend_redirect_url) if self.frontend_redirect_url else frontend
         callback = urlsplit(self.google_redirect_uri)
         if frontend.scheme != "https" or not frontend.netloc or frontend.path or frontend.query or frontend.fragment:
             raise RuntimeError("Production FRONTEND_ORIGIN must be an HTTPS origin without a path.")
+        if (
+            frontend_redirect.scheme != "https"
+            or frontend_redirect.netloc != frontend.netloc
+            or frontend_redirect.query
+            or frontend_redirect.fragment
+        ):
+            raise RuntimeError("Production FRONTEND_REDIRECT_URL must use FRONTEND_ORIGIN and contain no query or fragment.")
         if callback.scheme != "https" or not callback.netloc or callback.path != "/api/auth/google/callback" or callback.query or callback.fragment:
             raise RuntimeError("Production GOOGLE_REDIRECT_URI must be the HTTPS /api/auth/google/callback URL.")
         if not self.cookie_secure:

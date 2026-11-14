@@ -103,7 +103,7 @@ export function addLocalManualWorkout(input: ManualWorkoutInput): HistoryEntry {
 }
 
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
-const apiBaseUrl = configuredApiBaseUrl?.replace(/\/$/, "") ?? "";
+const apiBaseUrl = (configuredApiBaseUrl || "http://localhost:8000").replace(/\/$/, "");
 
 async function request<T>(
   path: string,

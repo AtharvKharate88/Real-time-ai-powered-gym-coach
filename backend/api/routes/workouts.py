@@ -47,6 +47,12 @@ def create_session(
     return _response(session_id, session)
 
 
+@router.post("/vision/prepare")
+def prepare_vision(exercise: str, request: Request) -> dict[str, bool]:
+    current_user(request)
+    return {"ready": session_manager.prepare_processor(exercise)}
+
+
 @router.get("/sessions/{session_id}/metrics", response_model=WorkoutMetricsResponse)
 def get_metrics(session_id: str, request: Request) -> WorkoutMetricsResponse:
     session = get_request_session(session_id, request)
