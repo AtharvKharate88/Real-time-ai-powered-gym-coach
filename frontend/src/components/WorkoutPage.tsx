@@ -21,6 +21,33 @@ function readVoicePreference(): boolean {
   catch { return true; }
 }
 
+function waitForIceGatheringComplete(connection: RTCPeerConnection): Promise<void> {
+  if (connection.iceGatheringState === "complete") return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out gathering WebRTC network candidates. Check the TURN server and retry."));
+    }, 20_000);
+
+    const onIceGatheringStateChange = () => {
+      if (connection.iceGatheringState === "complete") {
+        cleanup();
+        resolve();
+      }
+    };
+
+    const cleanup = () => {
+      window.clearTimeout(timeoutId);
+      connection.removeEventListener("icegatheringstatechange", onIceGatheringStateChange);
+    };
+
+    connection.addEventListener("icegatheringstatechange", onIceGatheringStateChange);
+    // Gathering can complete between the initial check and listener registration.
+    onIceGatheringStateChange();
+  });
+}
+
 const exerciseMetrics: Record<Exercise, { label: string; key: string; angle?: boolean }[]> = {
   "Squats": [
     { label: "Knee angle", key: "knee_angle", angle: true },
@@ -226,7 +253,15 @@ export default function WorkoutPage({ user, onBack, onDashboard, onHistory, onSi
 
       const offer = await connection.createOffer();
       await connection.setLocalDescription(offer);
-      const answer = await submitWebRTCOffer(session.session_id, offer);
+      // This backend uses non-trickle ICE, so send the completed SDP after
+      // browser candidates (including TURN relays) have been gathered.
+      await waitForIceGatheringComplete(connection);
+      const localOffer = connection.localDescription;
+      if (!localOffer?.sdp) throw new Error("The WebRTC offer is unavailable after ICE gathering.");
+      const answer = await submitWebRTCOffer(session.session_id, {
+        type: localOffer.type,
+        sdp: localOffer.sdp,
+      });
       await connection.setRemoteDescription(answer);
       await updateWorkoutStatus(session.session_id, "start");
       setSessionId(session.session_id);
