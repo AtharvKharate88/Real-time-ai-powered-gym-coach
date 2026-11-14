@@ -5,14 +5,36 @@ import logging
 import time
 from fractions import Fraction
 
-from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
+from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from fastapi import APIRouter, HTTPException, Request
 
 from ..schemas.workout import WebRTCAnswer, WebRTCOffer
+from ..services.auth import current_user
+from ..services.ice_config import build_ice_servers
 from ..services.workout_access import get_request_session
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/webrtc", tags=["webrtc"])
+
+
+def _ice_servers() -> list[dict[str, str | list[str]]]:
+    return build_ice_servers(
+        settings.stun_url,
+        settings.turn_url,
+        settings.turn_username,
+        settings.turn_credential,
+    )
+
+
+@router.get("/ice-servers")
+def get_ice_servers(request: Request) -> dict[str, list[dict[str, str | list[str]]]]:
+    """Return ICE settings to the signed-in browser for the active WebRTC session."""
+    current_user(request)
+    try:
+        return {"ice_servers": _ice_servers()}
+    except ValueError as error:
+        raise HTTPException(status_code=503, detail="TURN configuration is incomplete.") from error
 
 
 class ProcessedVideoTrack(VideoStreamTrack):
@@ -91,7 +113,16 @@ async def receive_offer(
         ) from error
     session.ensure_voice_pipeline()
 
-    peer_connection = RTCPeerConnection()
+    try:
+        configured_servers = [
+            RTCIceServer(**server) for server in _ice_servers()
+        ]
+    except ValueError as error:
+        raise HTTPException(status_code=503, detail="TURN configuration is incomplete.") from error
+
+    peer_connection = RTCPeerConnection(
+        configuration=RTCConfiguration(iceServers=configured_servers)
+    )
     processed_track = None
     session.peer_connection = peer_connection
 

@@ -14,7 +14,7 @@ Browser camera (640×480, ideal 15 FPS, max 24)
   → Neon PostgreSQL workout history
 ```
 
-Inference is performed on the backend with the Full Pose Landmarker model. Frame processing uses a one-frame queue and replaces stale frames so slow inference does not create a growing backlog. Voice generation runs outside the video inference loop. The frontend keeps one camera stream and one peer connection for a workout.
+Inference is performed on the backend with the Full Pose Landmarker model. Frame processing uses a one-frame queue and replaces stale frames so slow inference does not create a growing backlog. Voice generation runs outside the video inference loop. The frontend keeps one camera stream and one peer connection for a workout. Configure `STUN_URL` for ICE discovery; public deployments on Render also need all three `TURN_URL`, `TURN_USERNAME`, and `TURN_CREDENTIAL` values. Use TURN credentials scoped or timed by the provider where possible.
 
 The React application retains Google sign-in, user-specific dashboard and history, progress views, manual workout entry, and workout controls. The backend includes user ownership checks, SQLAlchemy persistence, and Alembic migrations. Camera video is sent to the configured backend for processing.
 

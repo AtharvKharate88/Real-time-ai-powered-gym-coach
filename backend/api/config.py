@@ -28,6 +28,10 @@ class Settings:
     auth_cookie_name: str = os.getenv("AUTH_COOKIE_NAME", "ai_gym_session")
     cookie_secure: bool = os.getenv("COOKIE_SECURE", "false").lower() == "true"
     auth_cookie_samesite: str = os.getenv("AUTH_COOKIE_SAMESITE", "lax").lower()
+    stun_url: str = os.getenv("STUN_URL", "stun:stun.l.google.com:19302")
+    turn_url: str = os.getenv("TURN_URL", "")
+    turn_username: str = os.getenv("TURN_USERNAME", "")
+    turn_credential: str = os.getenv("TURN_CREDENTIAL", "")
 
     def validate_production(self) -> None:
         """Fail fast when production would run with insecure or placeholder auth settings."""

@@ -73,6 +73,12 @@ interface WebRTCAnswer {
   type: "answer";
 }
 
+export interface WebRTCIceServer {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+
 export class ApiError extends Error {
   readonly statusCode: number;
 
@@ -227,4 +233,8 @@ export function submitWebRTCOffer(
     method: "POST",
     body: JSON.stringify(offer),
   });
+}
+
+export function getWebRTCIceServers(): Promise<{ ice_servers: WebRTCIceServer[] }> {
+  return request<{ ice_servers: WebRTCIceServer[] }>("/api/webrtc/ice-servers");
 }

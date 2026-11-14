@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   createWorkoutSession,
+  getWebRTCIceServers,
   getWorkoutMetrics,
   getVoice,
   getWorkoutHistory,
@@ -193,7 +194,8 @@ export default function WorkoutPage({ user, onBack, onDashboard, onHistory, onSi
       );
       createdSessionId = session.session_id;
 
-      const connection = new RTCPeerConnection();
+      const { ice_servers: iceServers } = await getWebRTCIceServers();
+      const connection = new RTCPeerConnection({ iceServers });
       peerConnection.current = connection;
       setConnectionState("connecting");
       connection.onconnectionstatechange = () => {
