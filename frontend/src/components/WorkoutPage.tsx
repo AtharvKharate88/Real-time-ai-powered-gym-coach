@@ -195,7 +195,17 @@ export default function WorkoutPage({ user, onBack, onDashboard, onHistory, onSi
       createdSessionId = session.session_id;
 
       const { ice_servers: iceServers } = await getWebRTCIceServers();
-      const connection = new RTCPeerConnection({ iceServers });
+      // Render only exposes the backend's HTTP port. When TURN is configured,
+      // keep the browser's media path on the relay instead of trying direct
+      // host/server-reflexive candidates that cannot reach the service.
+      const hasTurnServer = iceServers.some((server) => {
+        const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+        return urls.some((url) => url.startsWith("turn:") || url.startsWith("turns:"));
+      });
+      const connection = new RTCPeerConnection({
+        iceServers,
+        iceTransportPolicy: hasTurnServer ? "relay" : "all",
+      });
       peerConnection.current = connection;
       setConnectionState("connecting");
       connection.onconnectionstatechange = () => {
