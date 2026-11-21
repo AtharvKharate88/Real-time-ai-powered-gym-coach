@@ -10,20 +10,26 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 
+def container_app_origin() -> str:
+    """Derive the public origin when this API also serves the frontend on Azure."""
+    app_name = os.getenv("CONTAINER_APP_NAME")
+    dns_suffix = os.getenv("CONTAINER_APP_ENV_DNS_SUFFIX")
+    if app_name and dns_suffix:
+        return f"https://{app_name}.{dns_suffix}"
+    return "http://localhost:5173"
+
+
 @dataclass(frozen=True)
 class Settings:
     """Application settings loaded from environment variables."""
 
-    frontend_origin: str = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
+    frontend_origin: str = os.getenv("FRONTEND_ORIGIN") or container_app_origin()
     frontend_redirect_url: str = os.getenv("FRONTEND_REDIRECT_URL", "")
     environment: str = os.getenv("ENVIRONMENT", "development")
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
     google_client_secret: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
-    google_redirect_uri: str = os.getenv(
-        "GOOGLE_REDIRECT_URI",
-        "http://localhost:8000/api/auth/google/callback",
-    )
+    google_redirect_uri: str = os.getenv("GOOGLE_REDIRECT_URI") or f"{container_app_origin().replace(':5173', ':8000')}/api/auth/google/callback"
     session_secret: str = os.getenv("SESSION_SECRET", "")
     auth_cookie_name: str = os.getenv("AUTH_COOKIE_NAME", "ai_gym_session")
     cookie_secure: bool = os.getenv("COOKIE_SECURE", "false").lower() == "true"

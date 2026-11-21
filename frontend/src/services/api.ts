@@ -142,19 +142,12 @@ export function addLocalManualWorkout(input: ManualWorkoutInput): HistoryEntry {
 }
 
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
-const apiBaseUrl = (configuredApiBaseUrl || "http://localhost:8000").replace(/\/$/, "");
+const apiBaseUrl = (configuredApiBaseUrl ?? (import.meta.env.PROD ? "" : "http://localhost:8000")).replace(/\/$/, "");
 
 async function request<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  if (!apiBaseUrl) {
-    throw new ApiError(
-      "VITE_API_BASE_URL is not configured. Restart Vite after creating frontend/.env.",
-      0,
-    );
-  }
-
   let response: Response;
 
   try {
@@ -190,12 +183,6 @@ export function getCurrentUser(): Promise<AuthUser> {
 }
 
 export function loginWithGoogle(): void {
-  if (!apiBaseUrl) {
-    throw new ApiError(
-      "VITE_API_BASE_URL is not configured. Restart Vite after creating frontend/.env.",
-      0,
-    );
-  }
   window.location.assign(`${apiBaseUrl}/api/auth/google/login`);
 }
 

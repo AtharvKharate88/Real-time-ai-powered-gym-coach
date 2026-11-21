@@ -2,10 +2,12 @@
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .logging_config import configure_logging
@@ -60,3 +62,9 @@ app.include_router(workouts_router)
 app.include_router(webrtc_router)
 
 app.include_router(local_workout_router)
+
+# In Azure, serve the Vite build from this same origin so secure session cookies
+# work consistently in Chrome, Android browsers, and iPhone Safari.
+frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+if frontend_dist.is_dir():
+    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
