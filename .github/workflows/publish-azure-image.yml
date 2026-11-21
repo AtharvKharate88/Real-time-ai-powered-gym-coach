@@ -27,5 +27,5 @@ jobs:
           context: .
           file: backend/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/ai-gym-coach:azure
+          tags: ghcr.io/atharvkharate88/ai-gym-coach:azure
           labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
