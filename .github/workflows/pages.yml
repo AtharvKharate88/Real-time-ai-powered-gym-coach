@@ -1,10 +1,6 @@
 name: Deploy AI Gym Coach to GitHub Pages
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'frontend/**'
   workflow_dispatch:
 
 permissions:

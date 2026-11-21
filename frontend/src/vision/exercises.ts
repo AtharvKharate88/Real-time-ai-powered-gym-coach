@@ -18,9 +18,12 @@ class MovementDetector extends RepTracker {
     const indices = lunge ? [23,25,27] : pushup ? [11,13,15,23,27] : [11,13,15];
     const confidence = (side: number) => Math.min(...indices.map(i => j[i + side].visibility));
     const jointAngle = (i: number) => angle(j[i], j[i+2], j[i+4]);
-    let side = confidence(0) >= confidence(1) ? 0 : 1;
-    if (lunge && (confidence(0) > 0.7) === (confidence(1) > 0.7)) {
-      side = jointAngle(23) <= jointAngle(24) ? 0 : 1;
+    let side: 0 | 1;
+    if (lunge) {
+      side = confidence(0) >= confidence(1) ? 0 : 1;
+      if ((confidence(0) > 0.7) === (confidence(1) > 0.7)) side = jointAngle(23) <= jointAngle(24) ? 0 : 1;
+    } else {
+      side = this.selectStableSide(confidence(0), confidence(1));
     }
     const visible = confidence(side) > 0.7;
     const shoulder = j[11+side], hip = j[23+side], knee = j[25+side], ankle = j[27+side];

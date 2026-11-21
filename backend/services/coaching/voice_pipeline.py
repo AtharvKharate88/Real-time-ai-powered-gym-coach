@@ -27,6 +27,12 @@ class VoicePipeline:
             configured_interval = 8.0
             log("[VOICE] Invalid GROQ_MIN_REQUEST_INTERVAL_SECONDS; using 8 seconds")
         self._min_groq_interval_seconds = max(0.0, configured_interval)
+        try:
+            session_interval = float(os.getenv("GROQ_MIN_SESSION_CUE_INTERVAL_SECONDS", "18"))
+        except ValueError:
+            session_interval = 18.0
+            log("[VOICE] Invalid GROQ_MIN_SESSION_CUE_INTERVAL_SECONDS; using 18 seconds")
+        self._min_session_cue_interval_seconds = max(0.0, session_interval)
         self._last_error = None
         self._worker = threading.Thread(
             target=self._run_worker,
@@ -90,7 +96,7 @@ class VoicePipeline:
 
     def process_event(self, event, exercise, metrics):
         issue = self._find_form_issue(exercise, metrics)
-        now = time.time()
+        now = time.monotonic()
         is_major_event = event in {
             "workout_started",
             "set_completed",
@@ -102,8 +108,8 @@ class VoicePipeline:
             return False
         with self._lock:
             if not is_major_event and (
-                now - self._last_feedback_at < 5
-                or now - self._last_submitted.get(event_key, 0) < 5
+                now - self._last_feedback_at < self._min_session_cue_interval_seconds
+                or now - self._last_submitted.get(event_key, 0) < self._min_session_cue_interval_seconds
             ):
                 return False
             if event_key in self._pending_events:
@@ -113,7 +119,7 @@ class VoicePipeline:
                 self._last_feedback_at = now
             self._pending_events.add(event_key)
 
-        task = (event, exercise, issue, event_key)
+        task = (event, exercise, issue, event_key, metrics.copy())
         try:
             self._tasks.put_nowait(task)
             log(f"[VOICE] Event queued event={event} exercise={exercise}")
@@ -155,13 +161,13 @@ class VoicePipeline:
                 continue
             if task is None:
                 break
-            event, exercise, issue, event_key = task
+            event, exercise, issue, event_key, metrics = task
             try:
                 if not self._wait_for_groq_rate_limit():
                     continue
                 log("[VOICE] Groq request started")
                 groq_started = time.perf_counter()
-                text = self.llm.give_feedback(event, issue)
+                text = self.llm.give_feedback(event, issue, exercise, metrics)
                 log(
                     f"[VOICE] Groq request completed in "
                     f"{(time.perf_counter() - groq_started) * 1000:.0f}ms"

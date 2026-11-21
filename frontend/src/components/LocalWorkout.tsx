@@ -7,15 +7,16 @@ import { usePoseCamera } from "../vision/usePoseCamera";
 import WorkoutFlowNav from "./WorkoutFlowNav";
 
 type Phase = "ready" | "running" | "paused" | "pending" | "saved" | "empty";
-function drawPose(canvas: HTMLCanvasElement, video: HTMLVideoElement, joints?: Joint[]) {
-  if (!video.videoWidth || !video.videoHeight) return;
-  if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+function drawPose(canvas: HTMLCanvasElement, frame: HTMLCanvasElement, joints?: Joint[]) {
+  if (!frame.width || !frame.height) return;
+  if (canvas.width !== frame.width || canvas.height !== frame.height) {
+    canvas.width = frame.width;
+    canvas.height = frame.height;
   }
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
   if (!joints) return;
   const visible = (index: number) => joints[index] && joints[index].visibility >= 0.55;
   const bones = [[11,13],[13,15],[12,14],[14,16],[11,12],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
@@ -61,6 +62,7 @@ export default function LocalWorkout({ draft, exercise, user, stream, onBack, on
   const state = useRef(phase);
   function transition(p: Phase) { state.current = p; setPhase(p); }
   const video = useRef<HTMLVideoElement>(null);
+  const cameraPanel = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const id = useRef(draft?.id ?? "");
   const [detector] = useState(() => createDetector(exercise, initial?.reps, initial?.good_frames, initial?.warning_frames, initial?.incorrect_frames));
@@ -76,12 +78,41 @@ export default function LocalWorkout({ draft, exercise, user, stream, onBack, on
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [error, setError] = useState("");
+  const [cameraFullscreen, setCameraFullscreen] = useState(false);
   const [voice, setVoice] = useState(() => {
     try { return localStorage.getItem("ai_gym_voice_coaching") !== "false"; } catch { return false; }
   });
   const lastCue = useRef({ text: "", when: 0 });
   const diagnostics = useRef(false);
   const recentFrames = useRef<Sample[]>([]);
+  useEffect(() => {
+    const panel = cameraPanel.current;
+    const syncFullscreen = () => setCameraFullscreen(Boolean(panel && document.fullscreenElement === panel));
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    return () => document.removeEventListener("fullscreenchange", syncFullscreen);
+  }, []);
+  useEffect(() => {
+    if (!cameraFullscreen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [cameraFullscreen]);
+  async function toggleCameraFullscreen() {
+    const panel = cameraPanel.current;
+    if (!panel) return;
+    if (document.fullscreenElement === panel) {
+      try { await document.exitFullscreen(); } catch { setCameraFullscreen(false); }
+      return;
+    }
+    if (cameraFullscreen) { setCameraFullscreen(false); return; }
+    try {
+      if (panel.requestFullscreen) await panel.requestFullscreen();
+      setCameraFullscreen(true);
+    } catch {
+      // CSS full-screen fallback covers mobile browsers without element fullscreen.
+      setCameraFullscreen(true);
+    }
+  }
   function clock() {
     return Math.min(86400, Math.floor((elapsed.current + (started.current === null ? 0 : performance.now() - started.current)) / 1000));
   }
@@ -153,9 +184,9 @@ export default function LocalWorkout({ draft, exercise, user, stream, onBack, on
       track?.removeEventListener("ended", pause); track?.removeEventListener("mute", pause);
     };
   }, [phase, stream]);
-  usePoseCamera(video, phase === "running", pose => {
+  usePoseCamera(video, phase === "running", (pose, _mediaTime, inferenceFrame) => {
     if (state.current !== "running") return;
-    if (canvas.current && video.current) drawPose(canvas.current, video.current, pose);
+    if (canvas.current && inferenceFrame) drawPose(canvas.current, inferenceFrame, pose);
     if (!pose) { detector.interruptMovement(); setFeedback("Step back until your full body is visible."); return; }
     const m = detector.process(pose);
     if (!m.movement_valid) detector.interruptMovement();
@@ -166,7 +197,7 @@ export default function LocalWorkout({ draft, exercise, user, stream, onBack, on
     if (m.reps >= sets * perSet) { void finish(); return; }
     if (voice && cue && window.speechSynthesis && !window.speechSynthesis.speaking) {
       const now = performance.now();
-      if (now - lastCue.current.when > (cue === lastCue.current.text ? 16000 : 6000)) {
+      if (now - lastCue.current.when > (cue === lastCue.current.text ? 30000 : 15000)) {
         window.speechSynthesis.speak(new SpeechSynthesisUtterance(cue)); lastCue.current = { text: cue, when: now };
       }
     }
@@ -194,7 +225,13 @@ export default function LocalWorkout({ draft, exercise, user, stream, onBack, on
         {(active || phase === "pending") && <button className="btn-ghost" disabled={saving} onClick={() => void finish()}>{saving ? "Saving…" : phase === "pending" ? "Retry save" : "Finish workout"}</button>}
       </div>
       <div className="workout-live-layout">
-        <div className="local-squat-preview"><video ref={video} autoPlay muted playsInline aria-label="Live workout camera" /><canvas hidden={phase !== "running"} ref={canvas} aria-hidden="true" /></div>
+        <div ref={cameraPanel} className={`local-squat-preview${cameraFullscreen ? " is-expanded" : ""}${phase === "running" ? " is-running" : ""}`}>
+          <video ref={video} autoPlay muted playsInline aria-label="Live workout camera" />
+          <canvas hidden={phase !== "running"} ref={canvas} aria-hidden="true" />
+          <button type="button" className="camera-fullscreen-toggle" aria-pressed={cameraFullscreen} onClick={() => void toggleCameraFullscreen()}>
+            {cameraFullscreen ? "Exit full screen" : "Full screen camera"}
+          </button>
+        </div>
         <div className="workout-kpis"><div><span>TIME</span><strong>{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2,"0")}</strong></div>
           <div><span>REPS</span><strong>{reps}</strong></div><div><span>SETS</span><strong>{Math.floor(reps / (perSet || 1))} / {sets}</strong></div>
           <div><span>FORM SCORE</span><strong>{score ?? "—"}</strong></div></div>

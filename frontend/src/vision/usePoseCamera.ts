@@ -3,7 +3,7 @@ import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import type { Joint } from "./squat";
 
 export function usePoseCamera(video: RefObject<HTMLVideoElement>, enabled: boolean,
-  onFrame: (pose: Joint[] | undefined, mediaTime: number) => void, onError: () => void, onTiming?: (start: number, inferenceMs: number, mediaTime: number) => void, onReady?: () => void,
+  onFrame: (pose: Joint[] | undefined, mediaTime: number, inferenceFrame?: HTMLCanvasElement) => void, onError: () => void, onTiming?: (start: number, inferenceMs: number, mediaTime: number) => void, onReady?: () => void,
   model: "full" | "lite" = "full", delegate: "CPU" | "GPU" = "CPU") {
   const callbacks = useRef({ onFrame, onError, onTiming, onReady });
   useEffect(() => { callbacks.current = { onFrame, onError, onTiming, onReady }; }, [onFrame, onError, onTiming, onReady]);
@@ -13,6 +13,8 @@ export function usePoseCamera(video: RefObject<HTMLVideoElement>, enabled: boole
     let timer = 0;
     let frameCallback = 0;
     const element = video.current;
+    const inferenceFrame = document.createElement("canvas");
+    const frameContext = inferenceFrame.getContext("2d", { alpha: false });
     let task: PoseLandmarker | undefined;
     async function run() {
       try {
@@ -47,9 +49,16 @@ export function usePoseCamera(video: RefObject<HTMLVideoElement>, enabled: boole
             if (!document.hidden && element && element.readyState >= 2 && frame !== lastFrame && start >= nextDue) {
               lastFrame = frame;
               nextDue = Math.max(start, (nextDue || start) + 80);
+              if (frameContext && (inferenceFrame.width !== element.videoWidth || inferenceFrame.height !== element.videoHeight)) {
+                inferenceFrame.width = element.videoWidth;
+                inferenceFrame.height = element.videoHeight;
+              }
+              if (frameContext && inferenceFrame.width && inferenceFrame.height) {
+                frameContext.drawImage(element, 0, 0, inferenceFrame.width, inferenceFrame.height);
+              }
               const pose = task!.detectForVideo(element, start).landmarks[0];
               const ms = performance.now() - start;
-              callbacks.current.onFrame(pose, mediaTime);
+              callbacks.current.onFrame(pose, mediaTime, inferenceFrame);
               callbacks.current.onTiming?.(start, ms, mediaTime);
             }
             schedule();
