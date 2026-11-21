@@ -225,12 +225,26 @@ export default function LocalWorkout({ draft, exercise, user, stream, onBack, on
   }, undefined, "full");
   function leave(action: () => void) { if (!savingRef.current) { pause(); action(); } }
   const active = phase === "running" || phase === "paused";
+  const ended = ["saved", "empty", "pending"].includes(phase);
+  const timeLabel = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2,"0")}`;
+  if (ended) return <main className="workout-page workout-finished">
+    <WorkoutFlowNav user={user} step={3} onDashboard={onDashboard} onSignOut={onSignOut} />
+    <section className="session-summary">
+      <div className="summary-emblem" aria-hidden="true">{phase === "pending" ? "↗" : "✓"}</div>
+      <span className="eyebrow">SESSION COMPLETE</span>
+      <h1>Your workout.<br /><em>In the books.</em></h1>
+      <p>{exercise} · {phase === "pending" ? "Workout ended — saving is pending." : phase === "empty" ? "Session ended with no recorded reps." : "Saved to your workout history."}</p>
+      <div className="summary-totals"><div><strong>{reps}</strong><span>Total reps</span></div><div><strong>{Math.floor(reps / perSet)}</strong><span>Completed sets</span></div><div><strong>{timeLabel}</strong><span>Workout time</span></div></div>
+      {error && <p role="alert" className="workout-error">{error}</p>}
+      <div className="summary-actions">{phase === "pending" && <button className="btn-primary" disabled={saving} onClick={() => void finish()}>{saving ? "Saving…" : "Retry save"}</button>}<button className={phase === "pending" ? "btn-ghost" : "btn-primary"} disabled={saving} onClick={onDashboard}>Back to dashboard →</button>{phase === "saved" && <button className="btn-ghost" onClick={onHistory}>View history</button>}<button className="btn-ghost" disabled={saving} onClick={onBack}>Another workout</button></div>
+    </section>
+  </main>;
   return <main className="workout-page">
     <WorkoutFlowNav user={user} step={3} onDashboard={() => leave(onDashboard)} onSignOut={() => leave(onSignOut)} />
     <section className="workout-panel">
-      <h1>{exercise}</h1>
+      <div className="session-heading"><div><span className="eyebrow">YOUR TRAINING SPACE</span><h1>{exercise}</h1></div><span className={`session-state state-${phase}`}>{phase === "running" ? "● Live session" : phase === "paused" ? "Ⅱ Paused" : "Ready when you are"}</span></div>
       <p>Choose your targets, then start when you are in position. Spoken tips are optional.</p>
-      <div className="workout-controls">
+      <div className="workout-controls" aria-label="Workout targets and controls">
         <label>Sets <input type="number" min={1} max={50} value={sets} disabled={phase !== "ready"} onChange={e => setSets(Number(e.target.value))} /></label>
         <label>Reps per set <input type="number" min={1} max={50} value={perSet} disabled={phase !== "ready"} onChange={e => setPerSet(Number(e.target.value))} /></label>
         <label><input type="checkbox" checked={voice} onChange={e => { setVoice(e.target.checked); try { localStorage.setItem("ai_gym_voice_coaching", String(e.target.checked)); } catch { /* Preference is optional. */ } if (!e.target.checked) window.speechSynthesis?.cancel(); }} /> Spoken tips</label>
@@ -238,6 +252,7 @@ export default function LocalWorkout({ draft, exercise, user, stream, onBack, on
         {phase === "running" && <button className="btn-ghost" onClick={pause}>Pause</button>}
         {(active || phase === "pending") && <button className="btn-ghost" disabled={saving} onClick={() => void finish()}>{saving ? "Saving…" : phase === "pending" ? "Retry save" : "Finish workout"}</button>}
       </div>
+      <div className="session-progress"><span>Session progress</span><strong>{reps} / {sets * perSet} reps</strong><progress aria-label="Reps completed" value={reps} max={sets * perSet || 1} /></div>
       <div className="workout-live-layout">
         <div ref={cameraPanel} className={`local-squat-preview${cameraFullscreen ? " is-expanded" : ""}${selfie ? " is-selfie" : ""}`}>
           <video ref={video} autoPlay muted playsInline aria-label="Live workout camera" />
@@ -252,7 +267,7 @@ export default function LocalWorkout({ draft, exercise, user, stream, onBack, on
           <div><span>REPS</span><strong>{reps}</strong></div><div><span>SETS</span><strong>{Math.floor(reps / (perSet || 1))} / {sets}</strong></div>
           <div><span>OBSERVED FORM</span><strong>{score ?? "—"}</strong></div></div>
       </div>
-      <p role="status">{phase === "saved" ? "Workout saved to history." : phase === "empty" ? "Workout ended with no recorded reps." : phase === "pending" ? "Workout is awaiting save." : phase === "paused" ? "Workout paused." : feedback}</p>
+      <p className="session-feedback" role="status">{phase === "saved" ? "Workout saved to history." : phase === "empty" ? "Workout ended with no recorded reps." : phase === "pending" ? "Workout is awaiting save." : phase === "paused" ? "Workout paused." : feedback}</p>
       {error && <p role="alert" className="workout-error">{error}</p>}
       <details onToggle={e=>{diagnostics.current=e.currentTarget.open;recentFrames.current=[];}}>
         <summary>Tracking performance</summary>

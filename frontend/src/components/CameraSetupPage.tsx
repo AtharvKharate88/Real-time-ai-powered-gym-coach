@@ -131,7 +131,7 @@ export default function CameraSetupPage({ user, cameraGuidance, exercise, onCont
     <main className="camera-page">
       <WorkoutFlowNav user={user} step={2} onDashboard={onDashboard} onSignOut={onSignOut} />
       <section className="camera-content">
-        <button type="button" className="btn-ghost flow-back" onClick={onBack}>← Back to exercises</button>
+        <button type="button" className="btn-ghost flow-back" onClick={onBack}>← Back to instructions</button>
         <div className="section-tag">CAMERA SETUP</div>
         <h1>Check your <em>camera</em></h1>
         <p className="camera-intro">{cameraGuidance}</p>
@@ -156,7 +156,7 @@ export default function CameraSetupPage({ user, cameraGuidance, exercise, onCont
             <div className="camera-note"><strong>Before you continue</strong><p>Keep your full body in view and leave room to move.</p><p>The coach checks your movement after you start.</p></div>
             {exercise === "Squats" && status === "ready" ? <SquatCameraCheck video={videoRef} /> : null}
             {status === "error" ? <button type="button" className="btn-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry camera</button> : null}
-            <button type="button" className="btn-primary" disabled={status !== "ready"} onClick={continueToWorkout}>Continue <span aria-hidden="true">→</span></button>
+            <button type="button" className="btn-primary" disabled={status !== "ready"} onClick={continueToWorkout}>Set workout targets <span aria-hidden="true">→</span></button>
           </aside>
         </div>
       </section>
