@@ -49,7 +49,7 @@ export default function CameraSetupPage({ user, cameraGuidance, exercise, onCont
               : { facingMode: { ideal: requestedFacingMode } }),
             width: { ideal: 640, max: 640 },
             height: { ideal: 480, max: 480 },
-            frameRate: { ideal: 15, max: 24 },
+            frameRate: { ideal: 30, max: 30 },
           },
           audio: false,
         });
@@ -149,7 +149,7 @@ export default function CameraSetupPage({ user, cameraGuidance, exercise, onCont
             {devices.length > 1 ? (
               <label className="camera-device-label">Camera
                 <select value={deviceId} onChange={(event) => void connectCamera(event.target.value, facingModeRef.current)}>
-                  {devices.map((device, index) => <option value={device.deviceId} key={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}
+                  {devices.map((device, index) => <option value={device.deviceId} key={device.deviceId}>{`${/front|user|face/i.test(device.label) ? "Selfie" : /back|rear|environment/i.test(device.label) ? "Rear" : "Camera"} ${index + 1}${/ultra.?wide/i.test(device.label) ? " · Ultra-wide" : /telephoto/i.test(device.label) ? " · Telephoto" : /wide/i.test(device.label) ? " · Wide" : ""}`}</option>)}
                 </select>
               </label>
             ) : null}

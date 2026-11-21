@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { draftKey, fetchDrafts, fetchWorkoutState, type Exercise, type AuthUser, type WorkoutDraft } from "../services/api";
+import { draftKey, fetchDrafts, fetchWorkoutState, type Exercise, type AuthUser, type WorkoutDraft, sendCheckpoint } from "../services/api";
 import LocalWorkout from "./LocalWorkout";
 
 interface Props {
@@ -9,7 +9,8 @@ interface Props {
 export default function WorkoutRecovery(props: Props) {
   const {user, exercise} = props;
   const [choices, setChoices] = useState<WorkoutDraft[] | null>(null);
-  const [selected, select] = useState<WorkoutDraft | null | undefined>(undefined);
+  const [savingId, setSavingId] = useState("");
+  const [saveError, setSaveError] = useState("");
   const [offline, setOffline] = useState(false);
   useEffect(() => {
     let active = true;
@@ -54,21 +55,27 @@ export default function WorkoutRecovery(props: Props) {
       clearTimeout(timeout);
       if (active) {
         setChoices([...drafts.values()]);
-        if (!drafts.size) select(null);
+
       }
     });
     return () => { active = false; clearTimeout(timeout); controller.abort(); };
   }, [user.id,exercise]);
-  if (selected !== undefined) return <LocalWorkout {...props} draft={selected} />;
-  return <main className="workout-page"><section className="workout-panel"><h1>{exercise}</h1>
-    {choices === null ? <p role="status">Checking for unfinished workouts…</p> : <>
-      {offline && <p>Showing workouts stored on this device.</p>}
-      {choices.map(d => <button className="btn-primary" key={d.id} onClick={() => select(d)}>
-        {d.progress.finished ? "Retry save" : "Recover workout"} · {d.progress.reps} reps · {d.progress.elapsed_seconds}s
-      </button>)}
-      <button className="btn-ghost" onClick={() => select(null)}>Start a separate workout</button>
-    </>}
-    <button className="btn-ghost" onClick={props.onBack}>Return to camera setup</button>
-  </section></main>;
+  async function retrySave(d: WorkoutDraft) {
+    setSavingId(d.id); setSaveError("");
+    try {
+      await sendCheckpoint(user.id, d.id, d.progress);
+      try { localStorage.removeItem(draftKey(user.id,d.id)); } catch { /* Server has confirmed saving. */ }
+      setChoices(rows => rows?.filter(row => row.id !== d.id) ?? []);
+    } catch { setSaveError("Saving is still unavailable. Your completed result remains on this device."); }
+    finally { setSavingId(""); }
+  }
+  return <>
+    {choices?.some(d => d.progress.finished) && <aside className="pending-results" aria-label="Completed workouts awaiting save">
+      <p>A previous workout has ended and is awaiting save.</p>
+      {choices.filter(d => d.progress.finished).map(d => <button className="btn-ghost" disabled={Boolean(savingId)} key={d.id} onClick={() => void retrySave(d)}>{savingId === d.id ? "Saving…" : "Retry saving result"} · {d.progress.reps} reps</button>)}
+      {offline && <p>Showing results stored on this device.</p>}
+      {saveError && <p role="alert">{saveError}</p>}
+    </aside>}
+    <LocalWorkout {...props} draft={null} />
+  </>;
 }
-

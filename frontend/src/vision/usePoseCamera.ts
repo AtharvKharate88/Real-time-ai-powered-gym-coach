@@ -48,7 +48,7 @@ export function usePoseCamera(video: RefObject<HTMLVideoElement>, enabled: boole
             const start = performance.now();
             if (!document.hidden && element && element.readyState >= 2 && frame !== lastFrame && start >= nextDue) {
               lastFrame = frame;
-              nextDue = Math.max(start, (nextDue || start) + 80);
+              nextDue = Math.max(start, (nextDue || start) + 40);
               if (frameContext && (inferenceFrame.width !== element.videoWidth || inferenceFrame.height !== element.videoHeight)) {
                 inferenceFrame.width = element.videoWidth;
                 inferenceFrame.height = element.videoHeight;
@@ -56,7 +56,7 @@ export function usePoseCamera(video: RefObject<HTMLVideoElement>, enabled: boole
               if (frameContext && inferenceFrame.width && inferenceFrame.height) {
                 frameContext.drawImage(element, 0, 0, inferenceFrame.width, inferenceFrame.height);
               }
-              const pose = task!.detectForVideo(element, start).landmarks[0];
+              const pose = task!.detectForVideo(frameContext ? inferenceFrame : element, start).landmarks[0];
               const ms = performance.now() - start;
               callbacks.current.onFrame(pose, mediaTime, inferenceFrame);
               callbacks.current.onTiming?.(start, ms, mediaTime);

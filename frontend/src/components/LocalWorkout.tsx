@@ -79,10 +79,15 @@ export default function LocalWorkout({ draft, exercise, user, stream, onBack, on
   const savingRef = useRef(false);
   const [error, setError] = useState("");
   const [cameraFullscreen, setCameraFullscreen] = useState(false);
+  const [frameReady, setFrameReady] = useState(false);
+  const selfie = stream.getVideoTracks()[0]?.getSettings().facingMode === "user";
   const [voice, setVoice] = useState(() => {
     try { return localStorage.getItem("ai_gym_voice_coaching") !== "false"; } catch { return false; }
   });
   const lastCue = useRef({ text: "", when: 0 });
+  const cueCandidate = useRef({text: "", since: 0});
+  const lastFrameAt = useRef(0);
+  const recoveryStored = useRef(false);
   const diagnostics = useRef(false);
   const recentFrames = useRef<Sample[]>([]);
   useEffect(() => {
@@ -128,8 +133,8 @@ export default function LocalWorkout({ draft, exercise, user, stream, onBack, on
     const summary = { exercise, finished, revision: ++revision.current, incorrect_frames: detector.incorrectFrames, reps: latestReps.current, target_sets: sets, reps_per_set: perSet,
       elapsed_seconds: clock(), good_frames: detector.goodFrames, warning_frames: detector.warningFrames };
     if (finished) pendingFinal.current = summary;
-    try { localStorage.setItem(draftKey(user.id,id.current), JSON.stringify({ id: id.current, progress: summary })); }
-    catch { setError("This browser cannot keep a recovery copy. Keep this tab open until saving finishes."); }
+    try { localStorage.setItem(draftKey(user.id,id.current), JSON.stringify({ id: id.current, progress: summary })); recoveryStored.current = true; }
+    catch { recoveryStored.current = false; setError("This browser cannot keep a recovery copy. Keep this tab open until saving finishes."); }
     if (sync && !finished) {
       void sendCheckpoint(user.id,id.current,summary).catch(() => {
         if (state.current === "running" || state.current === "paused") setError("Server checkpoint pending. This device will retry on the next checkpoint or save.");
@@ -146,13 +151,15 @@ export default function LocalWorkout({ draft, exercise, user, stream, onBack, on
     freeze();
     stream.getTracks().forEach(track => track.stop());
     transition("pending"); setError("");
+    setCameraFullscreen(false);
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
     const summary = checkpoint(true);
     savingRef.current = true; setSaving(true);
     try {
       await sendCheckpoint(user.id,id.current,summary);
       transition(summary.reps ? "saved" : "empty");
       try { localStorage.removeItem(draftKey(user.id,id.current)); } catch { /* The server acknowledged this workout. */ }
-    } catch (e) { setError(e instanceof ApiError && e.statusCode === 409 ? "Another copy of this workout has newer progress. Return to camera setup to recover it." : "Your save has not been confirmed. Retry when the backend is available."); }
+    } catch (e) { setError(e instanceof ApiError && e.statusCode === 409 ? "Another copy of this workout has newer progress. Return to camera setup to recover it." : recoveryStored.current ? "Workout ended. Your result is stored on this device and awaits saving online." : "Workout ended, but saving failed and no device copy could be stored. Keep this page open and retry."); }
     finally { savingRef.current = false; setSaving(false); }
   }
   function start() {
@@ -160,17 +167,22 @@ export default function LocalWorkout({ draft, exercise, user, stream, onBack, on
       setError("Camera interrupted. Return to camera setup to reconnect."); return;
     }
     if (!id.current) id.current = crypto.randomUUID();
-    setError(""); setFeedback("Finding your position…");
+    setFrameReady(false); lastFrameAt.current = performance.now(); cueCandidate.current = {text: "", since: 0};
+    void video.current?.play().catch(() => setError("Camera playback failed. Return to camera setup."));
+    setError(""); setFeedback("Preparing tracking…");
     started.current = performance.now(); transition("running"); checkpoint(false,true);
   }
   useEffect(() => {
     const el = video.current;
-    if (el) el.srcObject = stream;
+    if (el) { el.srcObject = stream; void el.play().catch(() => setError("Camera playback needs a tap. Press Start workout.")); }
     return () => { if (el) el.srcObject = null; window.speechSynthesis?.cancel(); };
   }, [stream]);
   useEffect(() => {
     if (phase !== "running") return;
-    const timer = window.setInterval(() => setSeconds(clock()), 500);
+    const timer = window.setInterval(() => {
+      setSeconds(clock());
+      if (performance.now() - lastFrameAt.current > 20000) { pause(); setFrameReady(false); setError("Tracking stopped responding. Tap Resume to retry or return to camera setup."); }
+    }, 500);
     const syncTimer = window.setInterval(() => { if (state.current === "running") checkpoint(false,true); },30000);
     const background = () => { if (document.hidden) pause(); };
     const track = stream.getVideoTracks()[0];
@@ -186,18 +198,20 @@ export default function LocalWorkout({ draft, exercise, user, stream, onBack, on
   }, [phase, stream]);
   usePoseCamera(video, phase === "running", (pose, _mediaTime, inferenceFrame) => {
     if (state.current !== "running") return;
-    if (canvas.current && inferenceFrame) drawPose(canvas.current, inferenceFrame, pose);
+    lastFrameAt.current = performance.now();
+    if (canvas.current && inferenceFrame && inferenceFrame.width) { drawPose(canvas.current, inferenceFrame, pose); setFrameReady(true); }
     if (!pose) { detector.interruptMovement(); setFeedback("Step back until your full body is visible."); return; }
     const m = detector.process(pose);
     if (!m.movement_valid) detector.interruptMovement();
-    const cue = m.movement_valid ? m.form_issue : "Keep the working joints in view.";
-    setFeedback(cue || (m.exercise_stage === "ready" ? "Ready to move" : m.exercise_stage));
-    setScore(m.form_score);
+    const cue = (m.movement_valid ? m.form_issue : "Keep the working joints in view.").split(";")[0];
+    setFeedback(m.movement_valid ? "Tracking your movement" : "Tracking needs a clear view");
+    setScore(m.movement_valid ? m.form_score : null);
     if (m.reps !== latestReps.current) { latestReps.current = m.reps; setReps(m.reps); checkpoint(false,m.reps % perSet === 0 && m.reps < sets*perSet); }
     if (m.reps >= sets * perSet) { void finish(); return; }
-    if (voice && cue && window.speechSynthesis && !window.speechSynthesis.speaking) {
+    if (cueCandidate.current.text !== cue) cueCandidate.current = {text: cue, since: performance.now()};
+    if (voice && cue && performance.now() - cueCandidate.current.since >= 1500 && window.speechSynthesis && !window.speechSynthesis.speaking) {
       const now = performance.now();
-      if (now - lastCue.current.when > (cue === lastCue.current.text ? 30000 : 15000)) {
+      if (now - lastCue.current.when > (cue === lastCue.current.text ? 45000 : 30000)) {
         window.speechSynthesis.speak(new SpeechSynthesisUtterance(cue)); lastCue.current = { text: cue, when: now };
       }
     }
@@ -215,26 +229,28 @@ export default function LocalWorkout({ draft, exercise, user, stream, onBack, on
     <WorkoutFlowNav user={user} step={3} onDashboard={() => leave(onDashboard)} onSignOut={() => leave(onSignOut)} />
     <section className="workout-panel">
       <h1>{exercise}</h1>
-      <p>Full pose tracking runs on this device. The bright wrist markers show where arm tracking ends; individual fingers are not tracked. Progress is checkpointed during the workout.</p>
+      <p>Choose your targets, then start when you are in position. Spoken tips are optional.</p>
       <div className="workout-controls">
         <label>Sets <input type="number" min={1} max={50} value={sets} disabled={phase !== "ready"} onChange={e => setSets(Number(e.target.value))} /></label>
         <label>Reps per set <input type="number" min={1} max={50} value={perSet} disabled={phase !== "ready"} onChange={e => setPerSet(Number(e.target.value))} /></label>
-        <label><input type="checkbox" checked={voice} onChange={e => { setVoice(e.target.checked); if (!e.target.checked) window.speechSynthesis?.cancel(); }} /> Spoken tips</label>
+        <label><input type="checkbox" checked={voice} onChange={e => { setVoice(e.target.checked); try { localStorage.setItem("ai_gym_voice_coaching", String(e.target.checked)); } catch { /* Preference is optional. */ } if (!e.target.checked) window.speechSynthesis?.cancel(); }} /> Spoken tips</label>
         {phase === "ready" || phase === "paused" ? <button className="btn-primary" disabled={![sets,perSet].every(n => Number.isInteger(n) && n >= 1 && n <= 50)} onClick={start}>{phase === "paused" ? "Resume" : "Start workout"}</button> : null}
         {phase === "running" && <button className="btn-ghost" onClick={pause}>Pause</button>}
         {(active || phase === "pending") && <button className="btn-ghost" disabled={saving} onClick={() => void finish()}>{saving ? "Saving…" : phase === "pending" ? "Retry save" : "Finish workout"}</button>}
       </div>
       <div className="workout-live-layout">
-        <div ref={cameraPanel} className={`local-squat-preview${cameraFullscreen ? " is-expanded" : ""}${phase === "running" ? " is-running" : ""}`}>
+        <div ref={cameraPanel} className={`local-squat-preview${cameraFullscreen ? " is-expanded" : ""}${selfie ? " is-selfie" : ""}`}>
           <video ref={video} autoPlay muted playsInline aria-label="Live workout camera" />
-          <canvas hidden={phase !== "running"} ref={canvas} aria-hidden="true" />
+          <canvas hidden={phase !== "running" || !frameReady} ref={canvas} aria-hidden="true" />
+          {phase === "running" && !frameReady && <div className="tracking-loading" role="status">Preparing tracking… Your camera stays live.</div>}
+          {cameraFullscreen && <div className="fullscreen-workout-controls"><strong>{reps} reps · {Math.floor(reps / perSet)} / {sets} sets</strong><span>{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2,"0")}</span>{active && <button className="btn-ghost" onClick={phase === "running" ? pause : start}>{phase === "running" ? "Pause" : "Resume"}</button>}{active && <button className="btn-primary" onClick={() => { setCameraFullscreen(false); if (document.fullscreenElement) void document.exitFullscreen(); void finish(); }}>Finish workout</button>}</div>}
           <button type="button" className="camera-fullscreen-toggle" aria-pressed={cameraFullscreen} onClick={() => void toggleCameraFullscreen()}>
             {cameraFullscreen ? "Exit full screen" : "Full screen camera"}
           </button>
         </div>
         <div className="workout-kpis"><div><span>TIME</span><strong>{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2,"0")}</strong></div>
           <div><span>REPS</span><strong>{reps}</strong></div><div><span>SETS</span><strong>{Math.floor(reps / (perSet || 1))} / {sets}</strong></div>
-          <div><span>FORM SCORE</span><strong>{score ?? "—"}</strong></div></div>
+          <div><span>OBSERVED FORM</span><strong>{score ?? "—"}</strong></div></div>
       </div>
       <p role="status">{phase === "saved" ? "Workout saved to history." : phase === "empty" ? "Workout ended with no recorded reps." : phase === "pending" ? "Workout is awaiting save." : phase === "paused" ? "Workout paused." : feedback}</p>
       {error && <p role="alert" className="workout-error">{error}</p>}
@@ -243,6 +259,7 @@ export default function LocalWorkout({ draft, exercise, user, stream, onBack, on
         {diagnostics.current && <p>{summarize(recentFrames.current).processedFps ?? "—"} processed FPS · {summarize(recentFrames.current).inferenceP95Ms ?? "—"} ms p95 inference</p>}
         <a href="?benchmark" target="_blank" rel="noreferrer">Open camera and recording benchmark</a>
       </details>
+      {["saved", "empty", "pending"].includes(phase) && <button className="btn-primary" disabled={saving} onClick={onDashboard}>Back to dashboard</button>}
       {phase === "saved" && <button className="btn-primary" onClick={onHistory}>View workout history</button>}
       <button className="btn-ghost" disabled={saving} onClick={() => leave(onBack)}>Return to camera setup</button>
     </section>
