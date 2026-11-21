@@ -3,6 +3,11 @@ name: Build AI Gym Coach image for Azure
 on:
   push:
     branches: [main]
+    paths:
+      - '.dockerignore'
+      - 'backend/**'
+      - 'frontend/**'
+      - 'backend/Dockerfile'
   workflow_dispatch:
 
 permissions:

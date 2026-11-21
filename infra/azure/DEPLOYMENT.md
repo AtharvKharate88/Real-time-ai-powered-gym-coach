@@ -13,6 +13,17 @@ The deployment uses one Azure Container App to serve both the Vite frontend and 
 
 Azure for Students currently has a hard credit stop: Microsoft says services and the subscription are disabled when the credit is used or expires, and continuing requires a support-mediated upgrade. Do not accept or initiate an upgrade. This is the safeguard that prevents Azure usage from turning into automatic Pay-As-You-Go charges.
 
+## Current deployment
+
+- Resource group: `rg-ai-gym-coach-student`
+- Azure region: UAE North. The Student subscription's region policy excludes Central India, and the `Microsoft.App` resource provider does not offer India South Central.
+- Container Apps environment: Consumption, logs disabled.
+- Container App: `ai-gym-coach-atharv-2211`, minimum 0 / maximum 3 replicas, HTTP scale threshold 10 concurrent requests per replica.
+- Application URL: <https://ai-gym-coach-atharv-2211.happyocean-b30f4c05.uaenorth.azurecontainerapps.io>
+- Google callback URI to add in Google Cloud OAuth settings: <https://ai-gym-coach-atharv-2211.happyocean-b30f4c05.uaenorth.azurecontainerapps.io/api/auth/google/callback>
+
+The deployed frontend, API, and Neon health endpoints returned HTTP 200. A 30-way read-only Neon health check returned 30/30 HTTP 200. This is a smoke check, not a sustained workout load test. Google sign-in requires the callback URI above to be added to the existing Google OAuth client.
+
 ## Estimate assumptions
 
 These are estimates, not measured Azure bills. The model assumes no other Container Apps use in the same subscription, one daily workout session of about one hour per cohort, 30-second checkpoints, scale-to-zero outside requests, and no video uploads or GPU inference. At 10 users this is about 36,000 API requests/month. At 30 users it is about 108,000 API requests/month. These are below Container Apps' published 2 million free monthly requests.
@@ -23,11 +34,8 @@ Idle cost after scaling to zero is $0 for Container Apps compute. The app has no
 
 ## Deployment order
 
-1. Build and inspect the container image in GitHub Actions. The workflow is manual only.
-2. If deploying from GHCR, review that this application image will be publicly downloadable, then set the package visibility to public. The repository is already public, and no secrets are baked into the image.
-3. Sign in to Azure CLI and select the existing Azure for Students subscription. Confirm the portal still shows the student offer, remaining credit, and expiry. Never upgrade the subscription.
-4. Create a new, dedicated resource group in Central India and deploy `main.bicep` to it. Pass the Neon pooled database URL, Google OAuth client ID/secret, and a new random session secret as secure parameters. Do not commit a parameter file containing credentials.
-5. Add the Bicep output `googleOAuthCallbackUrl` to the existing Google OAuth client's authorized redirect URIs. This must be done before completing Google sign-in in the deployed app.
-6. Test HTTPS, `/api/health`, Google sign-in, a saved workout, and a recovery checkpoint. Verify the app scales to zero after use and inspect actual Azure credit consumption.
-
-No resource is created by the files in this folder. The subscription and credit checks above were read-only.
+1. The public GHCR image has been published. The GitHub Actions workflow rebuilds it on frontend/backend source changes; the package contains no credentials.
+2. Sign in to Azure CLI and select the existing Azure for Students subscription. Confirm the Student offer is still active. Never upgrade it to Pay-As-You-Go.
+3. For a new environment, create a Consumption environment in an allowed region with `az containerapp env create --name <appName>-env --resource-group <resourceGroup> --location uaenorth --logs-destination none`. Then deploy `main.bicep` to the dedicated resource group, passing the frontend origin, Google callback URL, Neon pooled database URL, Google OAuth client ID/secret, and a new random session secret. Mark database and OAuth secrets as secure; never commit a parameter file containing credentials.
+4. Add the Google callback URI to the existing Google OAuth client's authorized redirect URIs before completing Google sign-in.
+5. Test a Google sign-in, a saved workout, and a recovery checkpoint. Check idle scale-to-zero and review actual Azure credit consumption after usage has posted.
