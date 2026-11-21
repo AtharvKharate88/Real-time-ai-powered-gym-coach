@@ -3,7 +3,31 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class LocalSquatSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    reps: int = Field(ge=1, le=2500)
+    reps_per_set: int = Field(ge=1, le=50)
+    target_sets: int = Field(ge=1, le=50)
+    elapsed_seconds: int = Field(ge=0, le=86400)
+    good_frames: int = Field(ge=0, le=2_000_000)
+    warning_frames: int = Field(ge=0, le=2_000_000)
+
+    @model_validator(mode="after")
+    def within_target(self):
+        if self.reps > self.target_sets * self.reps_per_set:
+            raise ValueError("Rep count exceeds the configured workout")
+        return self
+
+
+class LocalProgress(LocalSquatSummary):
+    exercise: Literal["Squats", "Push-ups", "Biceps Curls (Dumbbell)", "Shoulder Press", "Lunges"]
+    reps: int = Field(ge=0, le=2500)
+    incorrect_frames: int = Field(default=0, ge=0, le=2_000_000)
+    revision: int = Field(ge=1, le=2_000_000_000)
+    finished: bool
 
 
 class CreateWorkoutRequest(BaseModel):

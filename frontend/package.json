@@ -4,11 +4,14 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/prepare-vision.mjs",
+    "prebuild": "node scripts/prepare-vision.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "0.10.32",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

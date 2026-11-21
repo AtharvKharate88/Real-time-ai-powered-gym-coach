@@ -25,6 +25,39 @@ export interface WorkoutSession {
   status: "ready" | "running" | "paused" | "stopped";
 }
 
+export interface LocalSquatSummary {
+  reps: number;
+  reps_per_set: number;
+  target_sets: number;
+  elapsed_seconds: number;
+  good_frames: number;
+  warning_frames: number;
+}
+
+export function saveLocalSquats(id: string, summary: LocalSquatSummary) {
+  return request<{ saved: boolean }>(`/api/workouts/local/squats/${id}`, {
+    method: "PUT", body: JSON.stringify(summary),
+  });
+}
+
+export interface Progress extends LocalSquatSummary {
+  incorrect_frames: number; revision: number; finished: boolean; exercise: Exercise;
+}
+export interface WorkoutDraft { id: string; progress: Progress }
+export function draftKey(user: number, id: string) { return `gym-workout:${user}:${id}`; }
+export function fetchDrafts(account: number, signal?: AbortSignal) {
+  return request<WorkoutDraft[]>(`/api/workouts/local/accounts/${account}/drafts`, {signal});
+}
+export function sendCheckpoint(account: number, id: string, progress: Progress) {
+  return request<{ revision: number; finished: boolean }>(`/api/workouts/local/accounts/${account}/${id}`, {
+    method: "PUT", body: JSON.stringify(progress),
+  });
+}
+export function fetchWorkoutState(account: number, id: string, signal: AbortSignal) {
+  return request<{ exists: boolean; finished?: boolean; progress?: Progress }>(
+    `/api/workouts/local/accounts/${account}/${id}`, {signal});
+}
+
 export interface WorkoutMetrics {
   session_id: string;
   status: WorkoutSession["status"];

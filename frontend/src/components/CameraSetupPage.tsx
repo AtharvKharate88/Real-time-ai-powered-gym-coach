@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { prepareWorkoutVision, type AuthUser, type Exercise } from "../services/api";
+import { type AuthUser, type Exercise } from "../services/api";
 import WorkoutFlowNav from "./WorkoutFlowNav";
+import SquatCameraCheck from "./SquatCameraCheck";
 
 interface CameraSetupPageProps {
   user: AuthUser;
@@ -16,7 +17,7 @@ export default function CameraSetupPage({ user, cameraGuidance, exercise, onCont
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const cameraRequestRef = useRef<{ deviceId?: string; promise: Promise<void> } | null>(null);
-  const transferredRef = useRef(false);
+  const generation = useRef(0);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState("");
   const [status, setStatus] = useState<"connecting" | "ready" | "error">("connecting");
@@ -27,6 +28,7 @@ export default function CameraSetupPage({ user, cameraGuidance, exercise, onCont
     const existingRequest = cameraRequestRef.current;
     if (existingRequest && existingRequest.deviceId === requestedDeviceId) return existingRequest.promise;
 
+    const current = ++generation.current;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     setStatus("connecting");
@@ -45,11 +47,21 @@ export default function CameraSetupPage({ user, cameraGuidance, exercise, onCont
           },
           audio: false,
         });
+        if (generation.current !== current) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
         streamRef.current = stream;
+        stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+          if (generation.current !== current) return;
+          setError("Camera disconnected. Reconnect it and retry.");
+          setStatus("error");
+        }, { once: true });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
         }
+        if (generation.current !== current) return;
 
         const activeDevice = stream.getVideoTracks()[0]?.getSettings().deviceId ?? requestedDeviceId ?? "";
         setDeviceId(activeDevice);
@@ -57,9 +69,12 @@ export default function CameraSetupPage({ user, cameraGuidance, exercise, onCont
 
         // Device names are useful for the selector, but should not delay the live preview.
         void navigator.mediaDevices.enumerateDevices()
-          .then((inputs) => setDevices(inputs.filter((device) => device.kind === "videoinput")))
-          .catch(() => setDevices([]));
+          .then((inputs) => { if (generation.current === current) setDevices(inputs.filter((device) => device.kind === "videoinput")); })
+          .catch(() => {});
       } catch (cameraError) {
+        if (generation.current !== current) return;
+        streamRef.current?.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
         setStatus("error");
         const name = cameraError instanceof DOMException ? cameraError.name : "";
         setError(name === "NotAllowedError"
@@ -78,17 +93,18 @@ export default function CameraSetupPage({ user, cameraGuidance, exercise, onCont
   }, []);
 
   useEffect(() => {
-    void prepareWorkoutVision(exercise).catch(() => undefined);
     void connectCamera();
     return () => {
-      if (!transferredRef.current) streamRef.current?.getTracks().forEach((track) => track.stop());
+      generation.current++;
+      cameraRequestRef.current = null;
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
     };
   }, [attempt, connectCamera, exercise]);
 
   function continueToWorkout() {
     const stream = streamRef.current;
     if (!stream || stream.getVideoTracks().every((track) => track.readyState !== "live")) return;
-    transferredRef.current = true;
     streamRef.current = null;
     onContinue(stream);
   }
@@ -116,6 +132,7 @@ export default function CameraSetupPage({ user, cameraGuidance, exercise, onCont
               </label>
             ) : null}
             <div className="camera-note"><strong>Before you continue</strong><p>Keep your full body in view and leave room to move.</p><p>The coach checks your movement after you start.</p></div>
+            {exercise === "Squats" && status === "ready" ? <SquatCameraCheck video={videoRef} /> : null}
             {status === "error" ? <button type="button" className="btn-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry camera</button> : null}
             <button type="button" className="btn-primary" disabled={status !== "ready"} onClick={continueToWorkout}>Continue <span aria-hidden="true">→</span></button>
           </aside>

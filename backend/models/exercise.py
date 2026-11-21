@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Integer, JSON, Text, func
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Integer, JSON, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database.base import Base
@@ -9,6 +9,7 @@ from database.base import Base
 class Exercise(Base):
     __tablename__ = "exercises"
     __table_args__ = (
+        UniqueConstraint("user_id", "client_workout_id", name="uq_exercises_user_client_workout"),
         CheckConstraint(
             "form_score IS NULL OR (form_score >= 0 AND form_score <= 100)",
             name="ck_exercises_form_score_range",
@@ -55,6 +56,9 @@ class Exercise(Base):
     )
 
     form_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    progress: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    progress_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    client_workout_id: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     set_breakdown: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
 

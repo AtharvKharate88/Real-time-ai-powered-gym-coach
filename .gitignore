@@ -36,3 +36,4 @@ Thumbs.db
 *.db.backup-*
 *.sqlite
 *.sqlite3
+/frontend/public/vision/

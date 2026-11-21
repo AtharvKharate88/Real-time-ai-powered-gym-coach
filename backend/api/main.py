@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from .config import settings
 from .logging_config import configure_logging
+from .routes.local_workouts import router as local_workout_router
 from .routes.health import router as health_router
 from .routes.auth import router as auth_router
 from .routes.webrtc import router as webrtc_router
@@ -57,3 +58,5 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(workouts_router)
 app.include_router(webrtc_router)
+
+app.include_router(local_workout_router)

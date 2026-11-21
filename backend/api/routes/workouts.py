@@ -1,6 +1,9 @@
 """Workout session endpoints."""
 
-from fastapi import APIRouter, Request
+from uuid import UUID
+
+from fastapi import APIRouter, HTTPException, Request
+from database.repositories.exercise_repository import save_local_squats
 
 from ..schemas.workout import (
     CreateWorkoutRequest,
@@ -9,6 +12,7 @@ from ..schemas.workout import (
     WorkoutSessionResponse,
     HistoryEntry,
     ManualWorkoutRequest,
+    LocalSquatSummary,
     VoiceResponse,
 )
 from ..services.auth import current_user, optional_current_user
@@ -17,6 +21,16 @@ from ..services.workout_access import get_request_session
 from ..services.workout_sessions import session_manager
 
 router = APIRouter(prefix="/api/workouts", tags=["workouts"])
+
+
+@router.put("/local/squats/{workout_id}")
+def finish_local_squats(workout_id: UUID, body: LocalSquatSummary, request: Request) -> dict[str, bool]:
+    user = current_user(request)
+    samples = body.good_frames + body.warning_frames
+    score = round((100 * body.good_frames + 75 * body.warning_frames) / samples) if samples >= 30 else None
+    if not save_local_squats(user.id, str(workout_id), body.reps, body.reps_per_set, body.elapsed_seconds, score):
+        raise HTTPException(status_code=409, detail="This workout was already saved with a different summary.")
+    return {"saved": True}
 
 
 def _response(session_id: str, session) -> WorkoutSessionResponse:

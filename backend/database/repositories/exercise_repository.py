@@ -4,9 +4,24 @@
 from datetime import datetime
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 
 from database.session import SessionLocal
 from models import Exercise
+
+
+def save_local_squats(user_id: int, workout_id: str, reps: int, reps_per_set: int,
+                      seconds: int, form_score: int | None) -> bool:
+    breakdown = [min(reps_per_set, reps - offset) for offset in range(0, reps, reps_per_set)]
+    values = dict(exercise_name="Squats", reps=reps, sets=reps // reps_per_set,
+                  time=seconds, form_score=form_score, set_breakdown=breakdown)
+    with SessionLocal.begin() as db:
+        statement = insert(Exercise).values(user_id=user_id, client_workout_id=workout_id, **values)
+        db.execute(statement.on_conflict_do_nothing(index_elements=["user_id", "client_workout_id"]))
+        saved = db.scalars(select(Exercise).where(
+            Exercise.user_id == user_id, Exercise.client_workout_id == workout_id,
+        )).one()
+        return saved.progress_revision is None and all(getattr(saved, field) == value for field, value in values.items())
 
 
 def add_exercise(
@@ -43,7 +58,7 @@ def get_users_exercises(user_id: int) -> list[dict]:
     with SessionLocal() as db:
         workouts = db.scalars(
             select(Exercise)
-            .where(Exercise.user_id == user_id)
+            .where(Exercise.user_id == user_id, Exercise.progress_revision.is_(None))
             .order_by(Exercise.created_at.desc())
         ).all()
 
@@ -69,7 +84,7 @@ def get_anonymous_history() -> list[dict]:
     with SessionLocal() as db:
         workouts = db.scalars(
             select(Exercise)
-            .where(Exercise.user_id.is_(None))
+            .where(Exercise.user_id.is_(None), Exercise.progress_revision.is_(None))
             .order_by(Exercise.created_at.desc())
         ).all()
 

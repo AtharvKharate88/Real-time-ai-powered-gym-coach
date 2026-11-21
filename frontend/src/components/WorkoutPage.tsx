@@ -69,6 +69,7 @@ export default function WorkoutPage({ user, onBack, onDashboard, onHistory, onSi
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const mediaStream = useRef<MediaStream | null>(null);
   const preparedMediaStream = useRef<MediaStream | null>(preparedStream ?? null);
+  const selectedCamera = useRef(preparedStream?.getVideoTracks()[0]?.getSettings().deviceId);
   const voiceAudio = useRef<HTMLAudioElement | null>(null);
   const metricsRequestActive = useRef(false);
 
@@ -182,7 +183,8 @@ export default function WorkoutPage({ user, onBack, onDashboard, onHistory, onSi
           throw new Error("This browser does not support webcam access.");
         }
         return navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480, frameRate: { ideal: 15, max: 24 } },
+          video: { ...(selectedCamera.current ? { deviceId: { exact: selectedCamera.current } } : {}),
+            width: { ideal: 640, max: 640 }, height: { ideal: 480, max: 480 }, frameRate: { ideal: 15, max: 24 } },
           audio: false,
         });
       })();
@@ -417,7 +419,7 @@ export default function WorkoutPage({ user, onBack, onDashboard, onHistory, onSi
       <div className="section-header">
         <span className="section-tag">YOUR SESSION</span>
         <h1 className="section-title">Let’s <em>move.</em></h1>
-        <p className="workout-intro">The coach follows your movement and counts each rep. Keep your full body in view.</p>
+        <p className="workout-intro">Starting a coached workout sends live camera video to the coach server for tracking. Keep your full body in view.</p>
       </div>
       <section className="workout-panel">
         <div className="workout-controls">
