@@ -1,0 +1,24 @@
+{
+  "asset": "trainer.glb",
+  "bytes": 12045992,
+  "clips": [
+    "AlternatingLunges",
+    "BicepsCurl",
+    "Idle",
+    "PushUps",
+    "ShoulderPress",
+    "Squats"
+  ],
+  "source": "User-supplied Mixamo FBX character and clips",
+  "customClips": [
+    "ShoulderPress",
+    "AlternatingLunges"
+  ],
+  "validation": {
+    "sameRestSkeleton": true,
+    "sixClipsExported": true,
+    "techniqueValidated": false,
+    "physicalPhoneValidated": false
+  },
+  "license": "Retain source asset terms; no independent license is granted by this manifest."
+}

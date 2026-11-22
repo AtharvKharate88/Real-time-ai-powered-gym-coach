@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { AuthUser, Exercise, HistoryEntry } from "../services/api";
 import { addManualWorkout, getWorkoutHistory, readLocalWorkoutHistory } from "../services/api";
 
-type DashboardSection = "dashboard" | "history" | "profile" | "settings";
+const VirtualTrainer = lazy(() => import("./virtual-trainer/VirtualTrainer"));
+
+type DashboardSection = "trainer" | "dashboard" | "history" | "profile" | "settings";
 const exerciseNames: Exercise[] = ["Squats", "Push-ups", "Biceps Curls (Dumbbell)", "Shoulder Press", "Lunges"];
 
 function formatDate(value: string): string {
@@ -19,7 +21,7 @@ function readVoicePreference(): boolean {
   catch { return true; }
 }
 
-export default function DashboardPage({ user, onWorkout, onSignOut }: { user: AuthUser; onWorkout: () => void; onSignOut: () => void }) {
+export default function DashboardPage({ user, onWorkout, onSignOut }: { user: AuthUser; onWorkout: (exercise?: Exercise) => void; onSignOut: () => void }) {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -75,7 +77,7 @@ export default function DashboardPage({ user, onWorkout, onSignOut }: { user: Au
   }, [history]);
   const selectedEntries = workoutsByDay.get(localDayKey(selectedDay)) ?? [];
   const exerciseTotals = exerciseNames.map((name) => ({ name, reps: history.filter((entry) => entry.exercise_name === name).reduce((sum, entry) => sum + entry.reps, 0), sessions: history.filter((entry) => entry.exercise_name === name).length })).filter((item) => item.sessions > 0).sort((a, b) => b.reps - a.reps);
-  const sectionNames: Record<DashboardSection, string> = { dashboard: "Overview", history: "Workout history", profile: "Your profile", settings: "Settings" };
+  const sectionNames: Record<DashboardSection, string> = { trainer: "Virtual Trainer", dashboard: "Overview", history: "Workout history", profile: "Your profile", settings: "Settings" };
   const firstName = user.full_name?.trim().split(/\s+/)[0] || "there";
 
   async function submitManualWorkout(event: FormEvent<HTMLFormElement>) {
@@ -123,6 +125,7 @@ export default function DashboardPage({ user, onWorkout, onSignOut }: { user: Au
   const navItems: { id: DashboardSection | "start"; label: string; icon: string }[] = [
     { id: "dashboard", label: "Dashboard", icon: "▦" },
     { id: "start", label: "Start workout", icon: "＋" },
+    { id: "trainer", label: "Virtual Trainer", icon: "◇" },
     { id: "history", label: "Workout history", icon: "◷" },
     { id: "profile", label: "Profile", icon: "◎" },
     { id: "settings", label: "Settings", icon: "⚙" },
@@ -135,16 +138,17 @@ export default function DashboardPage({ user, onWorkout, onSignOut }: { user: Au
         <a href="/?view=dashboard" className="site-brand sidebar-brand" aria-label="AI Gym Coach dashboard"><span className="brand-mark">A</span><span>AI Gym Coach<small>TRAIN WITH INTENTION</small></span></a>
         <span className="sidebar-label">WORKSPACE</span>
         <nav className="sidebar-nav" aria-label="Dashboard sections">
-          {navItems.map((item) => item.id === "start" ? <button className="sidebar-item sidebar-start" type="button" key={item.id} onClick={onWorkout}><span>{item.icon}</span>{item.label}</button> : <button className={`sidebar-item${activeSection === item.id ? " is-active" : ""}`} type="button" key={item.id} aria-current={activeSection === item.id ? "page" : undefined} onClick={() => setSection(item.id as DashboardSection)}><span>{item.icon}</span>{item.label}</button>)}
+          {navItems.map((item) => item.id === "start" ? <button className="sidebar-item sidebar-start" type="button" key={item.id} onClick={() => onWorkout()}><span>{item.icon}</span>{item.label}</button> : <button className={`sidebar-item${activeSection === item.id ? " is-active" : ""}`} type="button" key={item.id} aria-current={activeSection === item.id ? "page" : undefined} onClick={() => setSection(item.id as DashboardSection)}><span>{item.icon}</span>{item.label}</button>)}
         </nav>
         <div className="sidebar-account"><span className="profile-avatar">{firstName.slice(0, 1).toUpperCase()}</span><div><strong>{user.full_name || "Athlete"}</strong><small>{user.email}</small></div><button type="button" aria-label="Sign out" title="Sign out" onClick={onSignOut}>↗</button></div>
       </aside>
 
       <section className="dashboard-main">
-        <header className="dashboard-topbar"><button className="dashboard-menu-toggle" type="button" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen((open) => !open)}><span aria-hidden="true">☰</span><span>Menu</span></button><span className="dashboard-breadcrumb">Workspace <span>/</span> {sectionNames[activeSection]}</span><button type="button" className="button button-primary button-small topbar-start" onClick={onWorkout}>＋ Start workout</button></header>
+        <header className="dashboard-topbar"><button className="dashboard-menu-toggle" type="button" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen((open) => !open)}><span aria-hidden="true">☰</span><span>Menu</span></button><span className="dashboard-breadcrumb">Workspace <span>/</span> {sectionNames[activeSection]}</span><button type="button" className="button button-primary button-small topbar-start" onClick={() => onWorkout()}>＋ Start workout</button></header>
         <div className="dashboard-content redesigned-dashboard-content">
+          {activeSection === "trainer" && <Suspense fallback={<p role="status">Loading Virtual Trainer…</p>}><VirtualTrainer onWorkout={onWorkout}/></Suspense>}
           {activeSection === "dashboard" ? <>
-            <div className="dashboard-heading redesigned-dashboard-heading"><div><span className="eyebrow">YOUR TRAINING SPACE</span><h1>Good to see you, {firstName}.</h1><p>Ready to build on your progress?</p></div><button className="button button-primary" type="button" onClick={onWorkout}>Start a workout <span aria-hidden="true">→</span></button></div>
+            <div className="dashboard-heading redesigned-dashboard-heading"><div><span className="eyebrow">YOUR TRAINING SPACE</span><h1>Good to see you, {firstName}.</h1><p>Ready to build on your progress?</p></div><button className="button button-primary" type="button" onClick={() => onWorkout()}>Start a workout <span aria-hidden="true">→</span></button></div>
             <div className="dashboard-stats redesigned-stats" aria-label="Workout totals">
               <article className="dashboard-stat"><span>Total workouts</span><strong>{loading ? <i className="stat-skeleton" /> : history.length}</strong><small>Saved to your history</small></article>
               <article className="dashboard-stat"><span>Total reps</span><strong>{loading ? <i className="stat-skeleton" /> : totalReps.toLocaleString()}</strong><small>Across all sessions</small></article>
@@ -156,7 +160,7 @@ export default function DashboardPage({ user, onWorkout, onSignOut }: { user: Au
                   <div className="week-bars" aria-label={`${weeklyWorkouts} workouts in the last seven days`}>{weekDays.map((day, index) => <div className="week-day" key={`${day.label}-${index}`}><span className="week-count">{loading ? "—" : day.count}</span><div className={`week-track${day.count ? " has-activity" : ""}`}><span style={{ height: loading ? "0%" : `${day.count ? Math.max(12, day.count / maxDailyWorkouts * 100) : 0}%` }} /></div><span className="week-label">{day.label}</span></div>)}</div>
                 </section>
                 <div className="dashboard-lower-grid"><section className="dashboard-history premium-panel"><div className="panel-title-row"><div><span className="eyebrow">PICK UP WHERE YOU LEFT OFF</span><h2>Recent workouts</h2></div><button type="button" className="text-button" onClick={() => setSection("history")}>See all <span aria-hidden="true">→</span></button></div>
-                  {loading ? <div className="history-loading" role="status">Loading your workouts…</div> : error ? <div className="dashboard-empty" role="alert"><p>We couldn’t load your workout history.</p><button type="button" className="button button-secondary" onClick={() => window.location.reload()}>Try again</button></div> : history.length === 0 ? <div className="dashboard-empty"><span className="empty-icon">＋</span><p>Your first workout is waiting.</p><span>Start a session and your progress will show up here.</span><button type="button" className="button button-primary" onClick={onWorkout}>Start your first workout</button></div> : <div className="history-list">{renderHistory(recent)}</div>}
+                  {loading ? <div className="history-loading" role="status">Loading your workouts…</div> : error ? <div className="dashboard-empty" role="alert"><p>We couldn’t load your workout history.</p><button type="button" className="button button-secondary" onClick={() => window.location.reload()}>Try again</button></div> : history.length === 0 ? <div className="dashboard-empty"><span className="empty-icon">＋</span><p>Your first workout is waiting.</p><span>Start a session and your progress will show up here.</span><button type="button" className="button button-primary" onClick={() => onWorkout()}>Start your first workout</button></div> : <div className="history-list">{renderHistory(recent)}</div>}
                 </section>
                   <section className="exercise-progress premium-panel"><div className="panel-title-row"><div><span className="eyebrow">YOUR SESSIONS</span><h2>Moves you’ve trained</h2></div></div>{exerciseTotals.length ? <div className="exercise-progress-list">{exerciseTotals.slice(0, 4).map((item) => <div key={item.name}><div><strong>{item.name}</strong><span>{item.sessions} sessions</span></div><strong>{item.reps.toLocaleString()} reps</strong></div>)}</div> : <p className="muted-copy">Your exercise progress will appear after your first session.</p>}</section>
                 </div>
@@ -171,7 +175,7 @@ export default function DashboardPage({ user, onWorkout, onSignOut }: { user: Au
             </div>
           </> : null}
 
-          {activeSection === "history" ? <section className="history-page-panel"><div className="dashboard-heading redesigned-dashboard-heading"><div><span className="eyebrow">YOUR TRAINING RECORD</span><h1>Workout history</h1><p>Every session you’ve saved, all in one place.</p></div><div className="history-total-pill">{history.length} sessions</div></div><div className="history-summary-row"><article><span>Total reps</span><strong>{loading ? "—" : totalReps.toLocaleString()}</strong></article><article><span>Total sets</span><strong>{loading ? "—" : totalSets.toLocaleString()}</strong></article></div>{loading ? <p className="history-loading" role="status">Loading your workouts…</p> : error ? <div className="dashboard-empty" role="alert"><p>We couldn’t load your workout history.</p><button type="button" className="button button-secondary" onClick={() => window.location.reload()}>Try again</button></div> : history.length === 0 ? <div className="dashboard-empty"><span className="empty-icon">◷</span><p>No saved workouts yet.</p><span>Your completed workouts will appear here.</span><button type="button" className="button button-primary" onClick={onWorkout}>Start a workout</button></div> : <div className="history-list history-list-page">{renderHistory(sortedHistory)}</div>}</section> : null}
+          {activeSection === "history" ? <section className="history-page-panel"><div className="dashboard-heading redesigned-dashboard-heading"><div><span className="eyebrow">YOUR TRAINING RECORD</span><h1>Workout history</h1><p>Every session you’ve saved, all in one place.</p></div><div className="history-total-pill">{history.length} sessions</div></div><div className="history-summary-row"><article><span>Total reps</span><strong>{loading ? "—" : totalReps.toLocaleString()}</strong></article><article><span>Total sets</span><strong>{loading ? "—" : totalSets.toLocaleString()}</strong></article></div>{loading ? <p className="history-loading" role="status">Loading your workouts…</p> : error ? <div className="dashboard-empty" role="alert"><p>We couldn’t load your workout history.</p><button type="button" className="button button-secondary" onClick={() => window.location.reload()}>Try again</button></div> : history.length === 0 ? <div className="dashboard-empty"><span className="empty-icon">◷</span><p>No saved workouts yet.</p><span>Your completed workouts will appear here.</span><button type="button" className="button button-primary" onClick={() => onWorkout()}>Start a workout</button></div> : <div className="history-list history-list-page">{renderHistory(sortedHistory)}</div>}</section> : null}
 
           {activeSection === "profile" ? <section className="simple-settings-page"><span className="eyebrow">YOUR ACCOUNT</span><h1>Your profile</h1><p>Account details from your Google sign-in.</p><article className="profile-detail-card"><span className="profile-avatar profile-avatar-large">{firstName.slice(0, 1).toUpperCase()}</span><div><span>Display name</span><strong>{user.full_name || "Athlete"}</strong></div><div><span>Email address</span><strong>{user.email}</strong></div><button className="button button-secondary" type="button" onClick={onSignOut}>Sign out</button></article></section> : null}
 

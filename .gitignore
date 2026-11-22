@@ -37,3 +37,8 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 /frontend/public/vision/
+
+# Local trainer sources and review renders
+/artifacts/
+/frontend/public/models/*.fbx
+/frontend/public/models/trainer/trainer-custom-exercises.glb

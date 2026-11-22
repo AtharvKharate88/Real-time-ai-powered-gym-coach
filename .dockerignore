@@ -10,3 +10,7 @@
 **/.venv
 **/venv
 *.log
+
+artifacts
+frontend/public/models/*.fbx
+frontend/public/models/trainer/trainer-custom-exercises.glb

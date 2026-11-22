@@ -46,7 +46,7 @@ export default function App() {
     return <WorkoutRecovery exercise={exercise} user={user!} stream={preparedCamera.current}
       onBack={() => show("camera")} onDashboard={() => show("dashboard")} onHistory={showHistory} onSignOut={() => void signOut()} />;
   }
-  if (view === "dashboard") return <DashboardPage user={user!} onWorkout={() => show("exercise")} onSignOut={() => void signOut()} />;
+  if (view === "dashboard") return <DashboardPage user={user!} onWorkout={(selectedExercise) => { if (selectedExercise) { setExercise(selectedExercise); show("instructions"); } else show("exercise"); }} onSignOut={() => void signOut()} />;
   if (view === "exercise") return <ExerciseSelectionPage user={user!} onContinue={(name) => { setExercise(name); show("instructions"); }} onBack={() => show("dashboard")} onSignOut={() => void signOut()} />;
   if (view === "instructions") return <ExerciseInstructionsPage user={user!} exercise={exercise} onContinue={() => show("camera")} onBack={() => show("exercise")} onDashboard={() => show("dashboard")} onSignOut={() => void signOut()} />;
   if (view === "camera" || view === "workout") return <CameraSetupPage user={user!} exercise={exercise} cameraGuidance={selected.camera} onContinue={startSelectedWorkout} onBack={() => show("instructions")} onDashboard={() => show("dashboard")} onSignOut={() => void signOut()} />;
