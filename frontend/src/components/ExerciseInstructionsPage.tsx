@@ -2,6 +2,8 @@ import type { AuthUser, Exercise } from "../services/api";
 import ExerciseIllustration from "./ExerciseIllustration";
 import WorkoutFlowNav from "./WorkoutFlowNav";
 import { exerciseOptions } from "./exerciseOptions";
+import { lazy, Suspense } from "react";
+const VirtualTrainer = lazy(() => import("./virtual-trainer/VirtualTrainer"));
 
 const coachChecks: Record<Exercise, string[]> = {
   "Squats": ["Squat low enough for a full repetition", "Keep your chest lifted"],
@@ -37,6 +39,7 @@ export default function ExerciseInstructionsPage({
           <div className="instructions-art-column"><ExerciseIllustration exercise={exercise} className="instructions-art" /><div className="exercise-quick-facts"><div><span>Equipment</span><strong>{details.equipment}</strong></div><div><span>Works</span><strong>{details.muscles}</strong></div><div><span>Level</span><strong>{details.difficulty}</strong></div></div></div>
           <div className="instructions-copy"><span className="eyebrow">BEFORE YOU BEGIN</span><h1>{exercise}</h1><p className="instructions-description">{details.description}</p>
             <section><h2>Set up your camera</h2><p>{details.camera}</p></section>
+            <section className="instruction-demo"><h2>Watch the movement</h2><Suspense fallback={<p role="status">Loading exercise demonstration…</p>}><VirtualTrainer initialExercise={exercise} compact onWorkout={() => {}} /></Suspense></section>
             <section><h2>How to do it</h2><ol>{details.instructions.map((instruction) => <li key={instruction}>{instruction}</li>)}</ol></section>
             <section className="coach-checks"><h2>What your coach will watch for</h2><ul>{coachChecks[exercise].map((tip) => <li key={tip}>{tip}</li>)}</ul></section>
             <button type="button" className="button button-primary instruction-cta" onClick={onContinue}>Set up camera <span aria-hidden="true">→</span></button>

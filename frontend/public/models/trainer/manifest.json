@@ -1,6 +1,6 @@
 {
   "asset": "trainer.glb",
-  "bytes": 12045992,
+  "bytes": 2946780,
   "clips": [
     "AlternatingLunges",
     "BicepsCurl",
@@ -20,5 +20,9 @@
     "techniqueValidated": false,
     "physicalPhoneValidated": false
   },
-  "license": "Retain source asset terms; no independent license is granted by this manifest."
+  "license": "Retain source asset terms; no independent license is granted by this manifest.",
+  "extensions": [
+    "KHR_draco_mesh_compression",
+    "KHR_materials_specular"
+  ]
 }
