@@ -30,7 +30,6 @@ export function usePoseCamera(video: RefObject<HTMLVideoElement>, enabled: boole
         if (disposed) { task.close(); return; }
         callbacks.current.onReady?.();
         let lastFrame = -1;
-        let nextDue = 0;
         function schedule() {
           if (disposed) return;
           if (element && typeof element.requestVideoFrameCallback === "function") {
@@ -39,16 +38,15 @@ export function usePoseCamera(video: RefObject<HTMLVideoElement>, enabled: boole
             timer = window.setTimeout(() => {
               const presented = element?.getVideoPlaybackQuality?.().totalVideoFrames;
               tick(presented || element?.currentTime || 0, element?.currentTime ?? 0);
-            }, Math.max(10, nextDue - performance.now()));
+            }, 16);
           }
         }
         function tick(frame: number, mediaTime: number) {
           if (disposed) return;
           try {
             const start = performance.now();
-            if (!document.hidden && element && element.readyState >= 2 && frame !== lastFrame && start >= nextDue) {
+            if (!document.hidden && element && element.readyState >= 2 && frame !== lastFrame) {
               lastFrame = frame;
-              nextDue = Math.max(start, (nextDue || start) + 40);
               if (frameContext && (inferenceFrame.width !== element.videoWidth || inferenceFrame.height !== element.videoHeight)) {
                 inferenceFrame.width = element.videoWidth;
                 inferenceFrame.height = element.videoHeight;

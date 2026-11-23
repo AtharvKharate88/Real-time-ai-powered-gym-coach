@@ -22,6 +22,7 @@ export class RepTracker {
   private pending: "up" | "down" | null = null;
   private frames = 0;
   private filteredStageValue: number | null = null;
+  private previousStageValue: number | null = null;
   private awaitingBaseline = true;
   private lockedSide: 0 | 1 | null = null;
   protected reps = 0;
@@ -48,6 +49,7 @@ export class RepTracker {
     this.pending = null;
     this.frames = 0;
     this.filteredStageValue = null;
+    this.previousStageValue = null;
     this.awaitingBaseline = true;
   }
 
@@ -67,18 +69,27 @@ export class RepTracker {
 
   protected updateStage(value: number, low: number, high: number, lowStage: "down" | "up",
     highStage: "down" | "up", countStage: "down" | "up") {
+    if (!Number.isFinite(value)) { this.interruptMovement(); return; }
+    const previousValue = this.previousStageValue;
+    this.previousStageValue = value;
     this.filteredStageValue = this.filteredStageValue === null
       ? value
       : value * 0.7 + this.filteredStageValue * 0.3;
     const stableValue = this.filteredStageValue;
-    const candidate = stableValue <= low ? lowStage : stableValue >= high ? highStage : null;
+    // A fast endpoint may last only one camera frame. Require a nearby preceding
+    // sample moving toward the endpoint, rather than accepting an isolated spike.
+    const supportedLow = previousValue !== null && previousValue <= low + 15 && value <= previousValue && value <= low;
+    const supportedHigh = previousValue !== null && previousValue >= high - 15 && value >= previousValue && value >= high;
+    const candidate = supportedLow ? lowStage : supportedHigh ? highStage
+      : stableValue <= low ? lowStage : stableValue >= high ? highStage : null;
     if (!candidate || candidate === this.stage) {
       this.pending = null;
       this.frames = 0;
     } else {
       this.frames = this.pending === candidate ? this.frames + 1 : 1;
       this.pending = candidate;
-      if (this.frames >= 2) {
+      const supportedEndpoint = candidate === lowStage ? supportedLow : supportedHigh;
+      if (this.frames >= 2 || (!this.awaitingBaseline && supportedEndpoint)) {
         if (this.awaitingBaseline) {
           if (candidate === countStage) {
             this.stage = candidate;
